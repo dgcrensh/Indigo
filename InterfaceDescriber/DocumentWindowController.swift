@@ -12,11 +12,16 @@ final class DocumentWindowController: NSWindowController {
     let canvasController: CanvasViewController
     let detailsController: DetailsPanelController
     let screenController: ScreenController
+    /// Where the window's settings come from: the shared store, or one a test gives. The window follows its changes.
+    var settingsStore: SettingsStore {
+        didSet { observeSettings(previous: oldValue) }
+    }
     /// The region editor the details panel shows, to tell opening from switching. Held strongly, so a new editor
     /// can't reuse its address and look like the same one.
     private var shownDetails: RegionEditor?
 
-    init(model: DocumentModel) {
+    init(model: DocumentModel, settingsStore: SettingsStore = .shared) {
+        self.settingsStore = settingsStore
         canvasController = CanvasViewController(model: model)
         detailsController = DetailsPanelController(model: model)
         screenController = ScreenController(model: model)
@@ -63,6 +68,9 @@ final class DocumentWindowController: NSWindowController {
         canvasController.followLinks = { [weak self] region, anchor in
             self?.screenController.followLinks(of: region, at: anchor)
         }
+        // Snapping starts as the settings say when a window opens; after that `S` decides.
+        model.snappingEnabled = settingsStore.settings.snapping
+        observeSettings(previous: nil)
     }
 
     @available(*, unavailable)
@@ -80,6 +88,34 @@ final class DocumentWindowController: NSWindowController {
 
     var inspectorItem: NSSplitViewItem {
         splitViewController.splitViewItems[2]
+    }
+
+    // MARK: Settings
+
+    private func observeSettings(previous: SettingsStore?) {
+        let center = NotificationCenter.default
+        if let previous {
+            center.removeObserver(self, name: SettingsStore.didChangeNotification, object: previous)
+        }
+        center.addObserver(
+            self, selector: #selector(settingsDidChange(_:)), name: SettingsStore.didChangeNotification,
+            object: settingsStore)
+        screenController.settingsStore = settingsStore
+        applySettings()
+    }
+
+    @objc private func settingsDidChange(_ notification: Notification) {
+        applySettings()
+    }
+
+    /// Copies the store's settings into the model, which the canvas and its keys follow, and shows or hides the error
+    /// banner.
+    func applySettings() {
+        let model = canvasController.model
+        if model.settings != settingsStore.settings {
+            model.settings = settingsStore.settings
+        }
+        canvasController.settingsBanner.show(message: settingsStore.error?.localizedDescription)
     }
 
     // MARK: Zoom

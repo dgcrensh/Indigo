@@ -47,7 +47,7 @@ final class ScreenManagementTests: XCTestCase {
         let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
         controller.window?.layoutIfNeeded()
         document.undoManager?.groupsByEvent = false
-        controller.screenController.presetStore = UserPresetStore(url: settingsURL)
+        controller.settingsStore = SettingsStore(url: settingsURL)
         controller.canvasController.update()
         XCTAssertEqual(document.model.activeScreenID, login)
         return (document, controller, controller.screenController)
@@ -231,7 +231,7 @@ final class ScreenManagementTests: XCTestCase {
         XCTAssertTrue(menu.items.contains { $0.title == "iPhone 15 (393 × 852)" })
 
         // A preset read from the file at launch is offered too.
-        XCTAssertEqual(UserPresetStore(url: settingsURL).presets.map(\.name), ["Watch"])
+        XCTAssertEqual(SettingsStore(url: settingsURL).settings.viewportPresets.map(\.name), ["Watch"])
     }
 
     @MainActor

@@ -4,7 +4,19 @@ import DescriberCore
 /// A `.uidesc` project package. Reads and writes through the core's package format and routes every edit through
 /// the core's `EditSession`, bridged to `NSUndoManager`.
 final class Document: NSDocument {
-    let model = DocumentModel(project: .untitled())
+    /// A new document's one screen gets the default viewport from settings, with This Device measured from the main
+    /// display; reading a file replaces it.
+    let model = DocumentModel(
+        project: .untitled(
+            viewport: SettingsStore.shared.settings.newScreenViewport(
+                displaySize: Document.mainDisplaySize)))
+
+    /// The main display's size in points, the whole screen.
+    private static var mainDisplaySize: (width: Double, height: Double) {
+        let bounds = CGDisplayBounds(CGMainDisplayID())
+        return (Double(bounds.width), Double(bounds.height))
+    }
+
     /// The package as last read or written, kept so a save only replaces files that changed and keeps files the
     /// project doesn't own.
     private var packageWrapper = FileWrapper(directoryWithFileWrappers: [:])

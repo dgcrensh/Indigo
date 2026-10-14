@@ -22,6 +22,8 @@ final class CanvasViewController: NSViewController {
     var performCommand: ((Command) throws -> Void)?
     let canvasView = CanvasView(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
     let toastView = ToastView(frame: .zero)
+    /// Shown while `settings.json` can't be used. The window controller sets its message.
+    let settingsBanner = SettingsBanner(frame: .zero)
     private var shownScreenID: ScreenID?
     private var shownProject: ObjectIdentifier?
     private var shownRevision: Int?
@@ -72,9 +74,18 @@ final class CanvasViewController: NSViewController {
         container.addSubview(canvasView)
         toastView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(toastView)
+        settingsBanner.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(settingsBanner)
+        // As wide as there is room for, up to 640 pt.
+        let bannerWidth = settingsBanner.widthAnchor.constraint(equalToConstant: 640)
+        bannerWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             toastView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             toastView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -24),
+            settingsBanner.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor, constant: 12),
+            settingsBanner.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            settingsBanner.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 12),
+            bannerWidth,
         ])
         view = container
     }
@@ -93,6 +104,7 @@ final class CanvasViewController: NSViewController {
             _ = model.snappingEnabled
             _ = model.tool
             _ = model.selection
+            _ = model.settings
         } onChange: { [weak self] in
             let controller = self
             Task { @MainActor in
@@ -149,7 +161,7 @@ final class CanvasViewController: NSViewController {
     }
 
     func gridSize(for screen: Screen) -> Int {
-        model.project.editorState.screens[screen.id]?.gridSize ?? Snapping.defaultGridSize
+        model.project.editorState.screens[screen.id]?.gridSize ?? model.settings.gridSize
     }
 
     /// How far each scrolling region on `screen` is scrolled, from its editor state.

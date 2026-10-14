@@ -32,9 +32,36 @@ enum MainMenu {
         to menu: NSMenu, _ title: String, action: Selector, keybind: KeyAction, index: Int = 0
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.identifier = NSUserInterfaceItemIdentifier("\(keybindPrefix)\(keybind.rawValue).\(index)")
         item.setKeyEquivalent(for: keybind, index: index)
         menu.addItem(item)
         return item
+    }
+
+    /// Starts the identifier of every item whose key comes from the registry, followed by its action and index.
+    private static let keybindPrefix = "keybind."
+
+    /// The keybind action and combination index of an item `addItem` made, or nil for any other item.
+    static func keybind(of item: NSMenuItem) -> (action: KeyAction, index: Int)? {
+        guard let identifier = item.identifier?.rawValue, identifier.hasPrefix(keybindPrefix) else { return nil }
+        let parts = identifier.dropFirst(keybindPrefix.count).split(separator: ".")
+        guard parts.count == 2, let action = KeyAction(rawValue: String(parts[0])), let index = Int(parts[1]) else {
+            return nil
+        }
+        return (action, index)
+    }
+
+    /// Sets the key equivalent of every item in `menu` and its submenus whose key comes from the registry, after the
+    /// keybinds in settings change.
+    static func applyKeybinds(_ registry: KeybindRegistry, to menu: NSMenu) {
+        for item in menu.items {
+            if let keybind = keybind(of: item) {
+                item.setKeyEquivalent(for: keybind.action, in: registry, index: keybind.index)
+            }
+            if let submenu = item.submenu {
+                applyKeybinds(registry, to: submenu)
+            }
+        }
     }
 
     private static func submenuItem(_ menu: NSMenu) -> NSMenuItem {
@@ -51,6 +78,8 @@ enum MainMenu {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Settings…", action: #selector(AppDelegate.openSettings(_:)), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = menu.addItem(

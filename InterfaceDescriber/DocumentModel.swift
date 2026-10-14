@@ -17,14 +17,19 @@ final class DocumentModel {
     /// Changes after every command, undo, redo and replacement of the project, so views that draw the model (the
     /// canvas) know to draw again. Regions aren't observable themselves.
     private(set) var revision = 0
-    /// Whether drawing, moving and resizing snap to the grid, which the canvas then shows. Toggled with `S`.
+    /// Whether drawing, moving and resizing snap to the grid, which the canvas then shows. Toggled with `S`; starts
+    /// from the settings when the window opens.
     var snappingEnabled = true
     /// The active tool. Every window starts with the Select tool.
     var tool: Tool = .select
     /// The selected regions on the active screen. Editor state, so changing it isn't an edit.
     var selection: [RegionID] = []
-    /// The keybinds; overrides from settings arrive in milestone 10.
-    var keybinds = KeybindRegistry.defaults
+    /// The app settings in use: the window controller copies them in from the settings store when they change.
+    var settings = AppSettings.defaults {
+        didSet { keybinds = settings.keybinds }
+    }
+    /// The keybinds, the defaults with any overrides from settings on top.
+    private(set) var keybinds = KeybindRegistry.defaults
 
     init(project: Project) {
         session = EditSession(project: project)

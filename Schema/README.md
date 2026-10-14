@@ -59,3 +59,56 @@ REGENERATE_EXAMPLE=1 swift test --package-path Packages/DescriberCore --filter t
 ```
 
 `scripts/check.sh` fails if the example doesn't re-save byte for byte or doesn't match the schema.
+
+## App settings
+
+The app's own settings live outside any package, in `~/Library/Application Support/Interface Describer/settings.json`
+(Settings… in the app menu opens it). The app watches the file and applies a saved edit at once. If the file
+doesn't parse or has a value the app can't use, every window shows the error and the settings from before stay in
+use; the app never rewrites such a file. Every key is optional, and any other key is an error:
+
+```json
+{
+  "defaultViewport": "ipad",
+  "gridSize": 16,
+  "snapping": false,
+  "viewportPresets": [
+    { "name": "Watch", "width": 198, "height": 242 }
+  ],
+  "keybinds": { "regionTool": "b", "zoomIn": ["cmd-+", "cmd-="], "followLink": [] }
+}
+```
+
+- `defaultViewport`: the viewport of a new screen or document. A preset's ID or name (built-in or one of
+  `viewportPresets`, case doesn't matter), `this-device`, or `{ "width": n, "height": n }`. Default `iphone-15`.
+- `gridSize`: the grid of a screen that hasn't had its own chosen with `G`: 4, 8, 12, 16, 24 or 32. Default 8.
+- `snapping`: whether snapping is on when a window opens. Default `true`.
+- `viewportPresets`: the user's presets, each with a `name` and a whole-number `width` and `height`. Save Viewport as
+  Preset… adds to this list and keeps the rest of the file as it is.
+- `keybinds`: action names mapped to a key, or a list of keys. A list replaces all of the action's default keys, and
+  an empty list leaves it without one. A key the file gives to one action is taken from the action that had it by
+  default; giving one key to two actions is an error. Keys are modifiers then the key, joined by `-`: `cmd`,
+  `shift`, `option` (or `alt`), `ctrl`, then a character or one of `return`, `delete`, `forward-delete`, `escape`,
+  `tab`, `space`, `left`, `right`, `up`, `down`. For example `v`, `shift-d`, `cmd-]`, `cmd--`, `cmd-option-left`.
+
+| Action | Default | Action | Default |
+| --- | --- | --- | --- |
+| `selectTool` | `v` | `nudgeLeft`, `nudgeRight`, `nudgeUp`, `nudgeDown` | `left`, `right`, `up`, `down` |
+| `regionTool` | `r` | `nudgeLeftFar`, `nudgeRightFar`, `nudgeUpFar`, `nudgeDownFar` | the arrows with `shift-` |
+| `writeTool` | `w` | `delete` | `delete`, `forward-delete` |
+| `toggleSnapping` | `s` | `undo` | `cmd-z` |
+| `gridSize` | `g` | `redo` | `cmd-shift-z` |
+| `toggleDescription` | `d` | `bringToFront` | `cmd-]` |
+| `toggleAllDescriptions` | `shift-d` | `sendToBack` | `cmd-[` |
+| `selectParent` | `shift-return` | `followLink` | `l` |
+| `selectChildren` | `return` | `back` | `cmd-option-left` |
+| `selectAll` | `cmd-a` | `forward` | `cmd-option-right` |
+| `copy` | `cmd-c` | `nextScreen` | `cmd-option-down` |
+| `paste` | `cmd-v` | `previousScreen` | `cmd-option-up` |
+| `duplicate` | `cmd-d` | `toggleSidebar` | `ctrl-cmd-s` |
+| `zoomIn` | `cmd-+`, `cmd-=` | `zoomOut` | `cmd--` |
+| `actualSize` | `cmd-0` | | |
+
+Holding Option to invert snapping, Escape closing the details panel, and the File menu's commands aren't actions and
+can't be rebound. Keybinds stay off while text is being edited, except `undo`, `redo`, `copy`, `paste` and
+`selectAll`.

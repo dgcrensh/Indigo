@@ -186,3 +186,14 @@ extension SettingsTests {
         }
     }
 }
+
+extension SettingsTests {
+    /// Errors for unknown actions point at `Schema/README.md`, so it names every one.
+    func testTheSchemaReadmeListsEverySettingAndAction() throws {
+        let readme = try String(
+            contentsOf: Fixtures.repositoryRoot.appendingPathComponent("Schema/README.md"), encoding: .utf8)
+        for name in SettingsFile.keys + KeyAction.allCases.map(\.rawValue) {
+            XCTAssertTrue(readme.contains("`\(name)`"), "Schema/README.md doesn't name `\(name)`")
+        }
+    }
+}
