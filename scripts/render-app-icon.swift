@@ -41,24 +41,26 @@ func drawIcon(in context: CGContext) {
     let ground = CGRect(x: 100, y: 100, width: 824, height: 824)
     let groundPath = CGPath(roundedRect: ground, cornerWidth: 185, cornerHeight: 185, transform: nil)
     context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: 12), blur: 24, color: color(0x000000, alpha: 0.25))
+    context.setShadow(offset: CGSize(width: 0, height: -12), blur: 24, color: color(0x000000, alpha: 0.25))
     context.addPath(groundPath)
     context.setFillColor(accent)
     context.drawPath(using: .fill)
     context.restoreGState()
     // A deeper band at the bottom of the ground, for depth.
-    // (Masked with destination-in rather than clipped: the script runs in the interpreter, which can't find the
-    // CoreGraphics overlay's clip and fill functions on the CI runner.)
+    // (Clipped to a mask image rather than the path: the script runs in the interpreter, which can't find the
+    // CoreGraphics overlay's path clip and fill functions on every Mac.)
+    let mask = CGContext(
+        data: nil, width: 1024, height: 1024, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+    mask.setFillColor(gray: 1, alpha: 1)
+    mask.addPath(groundPath)
+    mask.drawPath(using: .fill)
     context.saveGState()
-    context.beginTransparencyLayer(auxiliaryInfo: nil)
+    context.clip(to: CGRect(x: 0, y: 0, width: 1024, height: 1024), mask: mask.makeImage()!)
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
     let gradient = CGGradient(colorsSpace: space, colors: [accent, accentDeep] as CFArray, locations: [0, 1])!
     context.drawLinearGradient(
         gradient, start: CGPoint(x: 512, y: 100), end: CGPoint(x: 512, y: 924), options: [])
-    context.setBlendMode(.destinationIn)
-    context.addPath(groundPath)
-    context.drawPath(using: .fill)
-    context.endTransparencyLayer()
     context.restoreGState()
 
     // The sheet, tilted a little, with its shadow.
@@ -69,7 +71,7 @@ func drawIcon(in context: CGContext) {
     let sheetRect = CGRect(origin: .zero, size: sheetSize)
     let sheetPath = CGPath(roundedRect: sheetRect, cornerWidth: 44, cornerHeight: 44, transform: nil)
     context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: 18), blur: 36, color: color(0x1F1C19, alpha: 0.35))
+    context.setShadow(offset: CGSize(width: 0, height: -18), blur: 36, color: color(0x1F1C19, alpha: 0.35))
     context.addPath(sheetPath)
     context.setFillColor(sheet)
     context.drawPath(using: .fill)
