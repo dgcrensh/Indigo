@@ -17,6 +17,8 @@ struct CanvasColors {
     var handleFill: CGColor
     var newRegionFill: CGColor
     var marqueeFill: CGColor
+    /// The link indicator on regions with links.
+    var link: CGColor
 
     init(appearance: NSAppearance) {
         var colors: [CGColor] = []
@@ -35,6 +37,7 @@ struct CanvasColors {
                 NSColor.controlAccentColor.withAlphaComponent(0.12),
                 NSColor.controlAccentColor.withAlphaComponent(0.1),
                 NSColor.secondaryLabelColor,
+                NSColor.linkColor,
             ].map(\.cgColor)
         }
         boundsFill = colors[0]
@@ -50,5 +53,6 @@ struct CanvasColors {
         newRegionFill = colors[10]
         marqueeFill = colors[11]
         description = colors[12]
+        link = colors[13]
     }
 }

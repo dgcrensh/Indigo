@@ -302,6 +302,11 @@ final class CanvasView: NSView {
         Set(regionLayers.filter { $0.value.isShowingDescription }.keys)
     }
 
+    /// The regions whose layers are drawing the link indicator, for tests.
+    var linkedLayerIDs: Set<RegionID> {
+        Set(regionLayers.filter { $0.value.isShowingLinkIndicator }.keys)
+    }
+
     /// Whether the resize handles are showing, for tests.
     var showsHandles: Bool {
         !handleLayers[0].isHidden

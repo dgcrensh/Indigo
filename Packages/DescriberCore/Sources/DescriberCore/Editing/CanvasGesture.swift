@@ -69,6 +69,8 @@ public struct CanvasGesture {
         case draw
         case marquee(base: [RegionID])
         case writeClick
+        /// A Select-tool Cmd-press on a region with links (spec 5 and 8.4).
+        case followLink(RegionID)
     }
 
     public let context: GestureContext
@@ -82,6 +84,8 @@ public struct CanvasGesture {
     /// What the details panel should do, set on release. A region the gesture draws opens through its
     /// `CreateRegion` command instead.
     public private(set) var detailsRequest: DetailsRequest?
+    /// The region whose links to follow, set on release of a Select-tool Cmd-click on a region with links.
+    public private(set) var linkRequest: RegionID?
 
     private var kind: Kind = .none
     private var current: CGPoint
@@ -109,7 +113,12 @@ public struct CanvasGesture {
             kind = .writeClick
         case .select:
             let index = RegionIndex(screen: context.screen)
-            if selection.count == 1, let selected = index.region(selection[0]),
+            if modifiers.contains(.command), let hit = HitTesting.region(at: point, in: context.screen),
+                index.region(hit)?.links.isEmpty == false
+            {
+                selection = [hit]
+                kind = .followLink(hit)
+            } else if selection.count == 1, let selected = index.region(selection[0]),
                 let handle = ResizeHandle.handle(
                     at: point, on: selected.frame.cgRect, radius: Self.handleRadius / context.zoom)
             {
@@ -167,7 +176,7 @@ public struct CanvasGesture {
         let dy = point.y - start.y
 
         switch kind {
-        case .none, .writeClick:
+        case .none, .writeClick, .followLink:
             break
         case .resize(let region, let handle, let original):
             let frame = Self.resizedFrame(original, handle: handle, dx: dx, dy: dy, grid: grid)
@@ -207,6 +216,8 @@ public struct CanvasGesture {
                 let hit = HitTesting.region(at: start, in: context.screen)
                 selection = hit.map { [$0] } ?? []
                 detailsRequest = hit.map(DetailsRequest.open) ?? .close
+            case .followLink(let region):
+                linkRequest = region
             case .move where clickCount >= 2:
                 if let hit = HitTesting.region(at: start, in: context.screen) {
                     selection = [hit]
@@ -219,7 +230,7 @@ public struct CanvasGesture {
         }
 
         switch kind {
-        case .none, .writeClick, .marquee:
+        case .none, .writeClick, .marquee, .followLink:
             return nil
         case .resize(let region, let handle, let original):
             let frame = Self.resizedFrame(

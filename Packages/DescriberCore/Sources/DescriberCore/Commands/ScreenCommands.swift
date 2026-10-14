@@ -1,6 +1,6 @@
 import Foundation
 
-/// Adds a new, empty screen.
+/// Adds a new, empty screen. A position inside a variant group puts it after the group.
 public struct AddScreen: Command {
     public let actionName = "New Screen"
     /// The screen to add. Created with the command so the caller knows its ID.
@@ -19,12 +19,13 @@ public struct AddScreen: Command {
         guard (0...project.screens.count).contains(index) else { throw EditError.indexOutOfRange(index) }
         let before = ProjectStructure(project: project)
         project.screens.insert(screen, at: index)
+        project.groupVariantScreens()
         return RestoreStructure(actionName: actionName, structure: before)
     }
 }
 
-/// Duplicates a screen just after the original, with new IDs throughout. Links inside the copy keep pointing at
-/// their original targets. The copy is not added to a variant group.
+/// Duplicates a screen just after the original (after its variant group, when it has one), with new IDs throughout.
+/// Links inside the copy keep pointing at their original targets. The copy is not added to a variant group.
 public struct DuplicateScreen: Command {
     public let actionName = "Duplicate Screen"
     public let source: ScreenID
@@ -45,6 +46,7 @@ public struct DuplicateScreen: Command {
         let before = ProjectStructure(project: project)
         let copy = ScreenCommands.copy(original, id: newID, name: name ?? "\(original.name) Copy")
         project.screens.insert(copy, at: project.screens.firstIndex { $0 === original }! + 1)
+        project.groupVariantScreens()
         return RestoreStructure(actionName: actionName, structure: before)
     }
 }
@@ -72,7 +74,8 @@ public struct ReorderScreen: Command {
 }
 
 /// Deletes a screen, removes every link to it from other screens, and drops it from its variant group (removing
-/// the group if it ends up empty). Undo restores all three.
+/// the group if it ends up empty). Undo restores all three. The only screen can't be deleted, since a project has
+/// one or more (spec Section 2).
 public struct DeleteScreen: Command {
     public let actionName = "Delete Screen"
     public let screen: ScreenID
@@ -83,6 +86,7 @@ public struct DeleteScreen: Command {
 
     public func apply(to project: Project) throws -> Command {
         let target = try project.requireScreen(screen)
+        guard project.screens.count > 1 else { throw EditError.nothingToDo }
         let linking = ScreenCommands.incomingLinks(to: screen, in: project).compactMap {
             project.region(withID: $0.region)?.region
         }
@@ -135,7 +139,8 @@ public struct NewVariant: Command {
     }
 }
 
-/// Groups screens as variants of one another. Screens already in another group leave it first.
+/// Groups screens as variants of one another. Screens already in another group leave it first. The group's screens
+/// are moved together in the sidebar, at the place of the first.
 public struct GroupVariants: Command {
     public let actionName = "Group Variants"
     public let screens: [ScreenID]
@@ -158,6 +163,7 @@ public struct GroupVariants: Command {
         let before = ProjectStructure(project: project)
         project.variantGroups = ScreenCommands.removing(unique, from: project.variantGroups)
         project.variantGroups.append(VariantGroup(name: name, screens: unique))
+        project.groupVariantScreens()
         return RestoreStructure(actionName: actionName, structure: before)
     }
 }
@@ -177,6 +183,115 @@ public struct UngroupVariants: Command {
         }
         let before = ProjectStructure(project: project)
         project.variantGroups.remove(at: group)
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Puts the screens in a new sidebar order, as a drag in the sidebar does. Variant groups are kept together.
+public struct ReorderScreens: Command {
+    public let actionName = "Move Screen"
+    /// Every screen in the project, in the new order.
+    public let order: [ScreenID]
+
+    public init(_ order: [ScreenID]) {
+        self.order = order
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let current = project.screens.map(\.id)
+        guard order.count == current.count, Set(order) == Set(current) else { throw EditError.nothingToDo }
+        let grouped = SidebarOutline.grouping(order, groups: project.variantGroups)
+        guard grouped != current else { throw EditError.nothingToDo }
+        let before = ProjectStructure(project: project)
+        let byID = Dictionary(uniqueKeysWithValues: project.screens.map { ($0.id, $0) })
+        project.screens = grouped.map { byID[$0]! }
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Makes a screen a variant of another: it joins the other screen's group, or the two form a new group named after
+/// the other screen. The screen leaves any group it was in (a group left with one screen is dissolved) and moves to
+/// the end of its new group in the sidebar.
+public struct JoinVariants: Command {
+    public let actionName = "Make Variant"
+    public let screen: ScreenID
+    public let target: ScreenID
+
+    public init(_ screen: ScreenID, joining target: ScreenID) {
+        self.screen = screen
+        self.target = target
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let moving = try project.requireScreen(screen)
+        let other = try project.requireScreen(target)
+        guard screen != target else { throw EditError.nothingToDo }
+        let targetGroup = project.variantGroups.firstIndex { $0.screens.contains(target) }
+        if let targetGroup, project.variantGroups[targetGroup].screens.contains(screen) {
+            throw EditError.nothingToDo
+        }
+        let before = ProjectStructure(project: project)
+        var groups = project.variantGroups
+        let groupName = targetGroup.map { groups[$0].name } ?? other.name
+        groups = ScreenCommands.removing([screen], from: groups, keepingSingles: false)
+        if let index = groups.firstIndex(where: { $0.screens.contains(target) }) {
+            groups[index].screens.append(screen)
+        } else {
+            groups.append(VariantGroup(name: groupName, screens: [target, screen]))
+        }
+        project.variantGroups = groups
+        // Next to the group's last other screen, so the group gathers around it.
+        let members = groups.first { $0.screens.contains(screen) }!.screens
+        project.screens.removeAll { $0 === moving }
+        let last = project.screens.lastIndex { members.contains($0.id) }!
+        project.screens.insert(moving, at: last + 1)
+        project.groupVariantScreens()
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Takes a screen out of its variant group and puts it just after the group in the sidebar. A group left with one
+/// screen is dissolved.
+public struct LeaveVariantGroup: Command {
+    public let actionName = "Remove from Variant Group"
+    public let screen: ScreenID
+
+    public init(_ screen: ScreenID) {
+        self.screen = screen
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let leaving = try project.requireScreen(screen)
+        guard let group = project.variantGroups.first(where: { $0.screens.contains(screen) }) else {
+            throw EditError.nothingToDo
+        }
+        let before = ProjectStructure(project: project)
+        project.variantGroups = ScreenCommands.removing([screen], from: project.variantGroups, keepingSingles: false)
+        project.screens.removeAll { $0 === leaving }
+        let last = project.screens.lastIndex { group.screens.contains($0.id) }!
+        project.screens.insert(leaving, at: last + 1)
+        project.groupVariantScreens()
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Renames the variant group a screen is in.
+public struct RenameVariantGroup: Command {
+    public let actionName = "Rename Variant Group"
+    public let screen: ScreenID
+    public let name: String
+
+    public init(containing screen: ScreenID, to name: String) {
+        self.screen = screen
+        self.name = name
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        guard let index = project.variantGroups.firstIndex(where: { $0.screens.contains(screen) }),
+            project.variantGroups[index].name != name
+        else { throw EditError.nothingToDo }
+        let before = ProjectStructure(project: project)
+        project.variantGroups[index].name = name
         return RestoreStructure(actionName: actionName, structure: before)
     }
 }
@@ -220,12 +335,19 @@ public enum ScreenCommands {
         )
     }
 
-    /// `groups` with `screens` taken out, dropping groups left empty.
-    static func removing(_ screens: [ScreenID], from groups: [VariantGroup]) -> [VariantGroup] {
+    /// `groups` with `screens` taken out, dropping groups left empty, and groups left with one screen too unless
+    /// `keepingSingles`.
+    static func removing(
+        _ screens: [ScreenID], from groups: [VariantGroup], keepingSingles: Bool = true
+    ) -> [VariantGroup] {
         groups.compactMap { group in
             var group = group
+            let count = group.screens.count
             group.screens.removeAll { screens.contains($0) }
-            return group.screens.isEmpty ? nil : group
+            if group.screens.isEmpty || (!keepingSingles && group.screens.count == 1 && count > 1) {
+                return nil
+            }
+            return group
         }
     }
 }

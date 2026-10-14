@@ -8,8 +8,12 @@ import Observation
 final class DocumentModel {
     /// Replaced when the document is read or reverted.
     var session: EditSession
-    /// The screen the canvas shows. Window state only; saving it arrives with screen management (milestone 8).
+    /// The screen the canvas shows. `show(_:)` changes it as the user does and saves it as the last active screen.
     var activeScreenID: ScreenID?
+    /// Link-following history for Back and Forward (spec 8.4). Window state, not saved or undone.
+    var history = NavigationHistory()
+    /// The sidebar order as of the last change, to find the screen that takes the place of a removed active one.
+    @ObservationIgnored private var screenOrder: [ScreenID] = []
     /// Changes after every command, undo, redo and replacement of the project, so views that draw the model (the
     /// canvas) know to draw again. Regions aren't observable themselves.
     private(set) var revision = 0
@@ -25,6 +29,7 @@ final class DocumentModel {
     init(project: Project) {
         session = EditSession(project: project)
         activeScreenID = project.initialScreen
+        screenOrder = SidebarOutline(project: project).screens
     }
 
     var project: Project {
@@ -49,6 +54,8 @@ final class DocumentModel {
         details = nil
         session = EditSession(project: project)
         activeScreenID = project.initialScreen
+        history = NavigationHistory()
+        screenOrder = SidebarOutline(project: project).screens
         noteChange()
         if hadDetails {
             detailsDidChange?()
@@ -118,8 +125,29 @@ final class DocumentModel {
         noteChange()
     }
 
-    /// Records that the project changed.
+    /// Shows `screen` on the canvas and saves it as the last active screen in the editor state, which the next save
+    /// writes (spec 3.1). Like zoom, it isn't an edit.
+    func show(_ screen: ScreenID) {
+        guard project.screen(withID: screen) != nil else { return }
+        if activeScreenID != screen {
+            activeScreenID = screen
+        }
+        if project.editorState.lastActiveScreen != screen {
+            project.editorState.lastActiveScreen = screen
+        }
+    }
+
+    /// Records that the project changed. When the change removed the active screen, as undoing a new screen does,
+    /// the screen that took its place in the sidebar is shown.
     func noteChange() {
         revision += 1
+        if let active = activeScreenID, project.screen(withID: active) == nil {
+            let replacement = ScreenNavigation.replacement(forRemoved: active, previousOrder: screenOrder, in: project)
+            activeScreenID = nil
+            if let replacement {
+                show(replacement)
+            }
+        }
+        screenOrder = SidebarOutline(project: project).screens
     }
 }

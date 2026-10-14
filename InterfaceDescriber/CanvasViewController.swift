@@ -34,6 +34,9 @@ final class CanvasViewController: NSViewController {
     /// The camera, and whether it was fitted, from before the details panel opened, to go back to when it closes.
     private var cameraBeforeDetails: (camera: Camera, isFitted: Bool)?
     private var cameraAnimation: Timer?
+    /// Follows the links of a region, given a point in the canvas view to show a menu at when it has several. The
+    /// window controller sets this to its screen controller.
+    var followLinks: ((RegionID, CGPoint) -> Void)?
     /// Where Copy writes regions and Paste reads them. Tests use a private pasteboard.
     var pasteboard = NSPasteboard.general
     /// Asks whether to delete regions that have regions inside them, and calls back with the answer. Shows a sheet
@@ -363,6 +366,7 @@ final class CanvasViewController: NSViewController {
         case .sendToBack: reorderSelection(to: .back)
         case .toggleDescription: toggleDescriptions(all: false)
         case .toggleAllDescriptions: toggleDescriptions(all: true)
+        case .followLink: followSelectedLink()
         case .nudgeLeft, .nudgeRight, .nudgeUp, .nudgeDown, .nudgeLeftFar, .nudgeRightFar, .nudgeUpFar, .nudgeDownFar:
             nudge(action)
         default: return false
@@ -521,6 +525,33 @@ final class CanvasViewController: NSViewController {
         canvasView.visibleDescriptions = model.project.editorState.visibleDescriptions
     }
 
+    // MARK: Following links (spec 8.4)
+
+    /// The one selected region, when it has links.
+    private var selectedLinkedRegion: Region? {
+        let selection = currentSelection
+        guard selection.count == 1, let screen = model.activeScreen,
+            let region = RegionIndex(screen: screen).region(selection[0]), !region.links.isEmpty
+        else { return nil }
+        return region
+    }
+
+    /// Whether `L` has a region to follow: one selected region with links.
+    var canFollowLink: Bool {
+        selectedLinkedRegion != nil
+    }
+
+    /// Follows the selected region's links, with a menu under the region when it has several.
+    func followSelectedLink() {
+        guard let region = selectedLinkedRegion else {
+            NSSound.beep()
+            return
+        }
+        model.closeDetails()
+        let anchor = canvasView.camera.viewPoint(fromScreen: CGPoint(x: region.frame.x, y: region.frame.maxY))
+        followLinks?(region.id, anchor)
+    }
+
     // MARK: Gestures
 
     /// Performs `command` as one step, and returns whether it was applied. A command with nothing to do, such as
@@ -593,6 +624,11 @@ extension CanvasViewController: CanvasInteraction {
         }
         setSelection(gesture.selection)
         canvasView.selection = gesture.selection
+        if let region = gesture.linkRequest {
+            model.closeDetails()
+            followLinks?(region, canvasView.camera.viewPoint(fromScreen: point))
+            return
+        }
         switch gesture.detailsRequest {
         case .open(let region):
             try? model.openDetails(for: region)

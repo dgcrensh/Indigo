@@ -28,6 +28,10 @@ final class Document: NSDocument {
             guard let self else { return }
             try self.perform(command)
         }
+        controller.screenController.performCommand = { [weak self] command in
+            guard let self else { return }
+            try self.perform(command)
+        }
         addWindowController(controller)
     }
 

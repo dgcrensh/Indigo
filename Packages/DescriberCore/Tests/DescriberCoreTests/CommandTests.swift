@@ -68,6 +68,14 @@ final class CommandTests: XCTestCase {
             ScreenCommands.setKind(.sheet, of: AcmeExample.resetPassword),
             ScreenCommands.setViewport(Viewport(width: 100, height: 100), of: AcmeExample.resetPassword),
             ScreenCommands.setScroll(Scroll(axis: .both, contentWidth: 1, contentHeight: 1), of: AcmeExample.login),
+            ReorderScreens([
+                AcmeExample.settings, AcmeExample.login, AcmeExample.loginDesktop, AcmeExample.resetPassword,
+                AcmeExample.accountMenu,
+            ]),
+            JoinVariants(AcmeExample.accountMenu, joining: AcmeExample.login),
+            JoinVariants(AcmeExample.accountMenu, joining: AcmeExample.resetPassword),
+            LeaveVariantGroup(AcmeExample.loginDesktop),
+            RenameVariantGroup(containing: AcmeExample.login, to: "Sign in"),
         ]
         for command in commands {
             try assertUndoable(command, on: AcmeExample.make())
@@ -251,7 +259,7 @@ final class CommandTests: XCTestCase {
 
         let original = try XCTUnwrap(project.screen(withID: AcmeExample.login))
         let copy = try XCTUnwrap(project.screen(withID: duplicate.newID))
-        XCTAssertEqual(project.screens.map(\.name).prefix(2), ["Login", "Login Copy"])
+        XCTAssertEqual(project.screens.map(\.name).prefix(3), ["Login", "Login (Desktop)", "Login Copy"])
         XCTAssertTrue(Set(copy.allRegions.map(\.id)).isDisjoint(with: original.allRegions.map(\.id)))
         XCTAssertEqual(copy.allRegions.map(\.links), original.allRegions.map(\.links))
         XCTAssertEqual(copy.allRegions.map(\.frame), original.allRegions.map(\.frame))
