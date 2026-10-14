@@ -13,9 +13,9 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 
 | # | Milestone | Plan | Builds on | Status |
 | --- | --- | --- | --- | --- |
-| 0 | Scaffold: package, app target, CI, `CLAUDE.md`, `scripts/check.sh` | [m0-scaffold.md](plans/m0-scaffold.md) | none | draft |
-| 1 | Data model and file format | [m1-file-format.md](plans/m1-file-format.md) | 0 | draft |
-| 2 | Command layer, parenting, snapping | [m2-commands.md](plans/m2-commands.md) | 1 | draft |
+| 0 | Scaffold: package, app target, CI, `CLAUDE.md`, `scripts/check.sh` | [m0-scaffold.md](plans/m0-scaffold.md) | none | shipped |
+| 1 | Data model and file format | [m1-file-format.md](plans/m1-file-format.md) | 0 | shipped |
+| 2 | Command layer, parenting, snapping | [m2-commands.md](plans/m2-commands.md) | 1 | shipped |
 | 3 | Document and app shell | not written | 1, 2 | |
 | 4 | Canvas rendering (starts with a 500-region performance spike) | not written | 3 | |
 | 5 | Tools, gestures, toasts, keybind registry | not written | 4 | |

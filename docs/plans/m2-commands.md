@@ -2,7 +2,7 @@
 
 How milestone 2 of the [v1 roadmap](../v1-roadmap.md) is built. Builds on [m1-file-format.md](m1-file-format.md).
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

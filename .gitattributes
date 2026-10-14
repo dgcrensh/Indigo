@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The example project must re-save byte for byte on every platform
+*.json text eol=lf

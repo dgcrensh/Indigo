@@ -1,0 +1,88 @@
+{
+  "id": "d23f0824-128b-4f33-8c5c-7fd0a6a3a450",
+  "name": "Login (Desktop)",
+  "kind": "screen",
+  "viewport": {
+    "preset": "desktop",
+    "width": 1440,
+    "height": 900
+  },
+  "regions": [
+    {
+      "id": "92276658-1e27-41c0-8a6a-63ec24ede6a4",
+      "title": "Hero",
+      "kind": "image",
+      "x": 0,
+      "y": 0,
+      "w": 720,
+      "h": 900,
+      "description": "Product illustration filling the left half."
+    },
+    {
+      "id": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+      "title": "Sign-in form",
+      "kind": "container",
+      "x": 880,
+      "y": 300,
+      "w": 400,
+      "h": 296,
+      "description": "Same fields as the phone layout, in a card.",
+      "children": [
+        {
+          "id": "923a7369-94e3-4f91-9a61-dbe22e44158b",
+          "title": "Email field",
+          "kind": "input",
+          "x": 904,
+          "y": 324,
+          "w": 352,
+          "h": 44,
+          "description": "Single-line input with placeholder 'you@example.com'."
+        },
+        {
+          "id": "18f135d2-5f55-4203-b018-50c5a38fd547",
+          "title": "Password field",
+          "kind": "input",
+          "x": 904,
+          "y": 384,
+          "w": 352,
+          "h": 44,
+          "description": "Secure input with a show/hide toggle."
+        },
+        {
+          "id": "907a70c3-1012-4037-b64c-e4228c38fb29",
+          "title": "Sign in",
+          "kind": "button",
+          "x": 904,
+          "y": 452,
+          "w": 352,
+          "h": 48,
+          "description": "Primary button. Return in either field also signs in.",
+          "linksTo": [
+            {
+              "screen": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+              "screenName": "Settings",
+              "trigger": "click, after a successful sign-in"
+            }
+          ]
+        },
+        {
+          "id": "7f150524-34b9-45df-9e77-69b10f4205b4",
+          "title": "Forgot password",
+          "kind": "button",
+          "x": 904,
+          "y": 524,
+          "w": 140,
+          "h": 24,
+          "description": "Text-style link button.",
+          "linksTo": [
+            {
+              "screen": "9531985d-5d9d-49f8-9818-e811892f902b",
+              "screenName": "Reset Password",
+              "trigger": "click"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
