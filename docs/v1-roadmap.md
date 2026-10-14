@@ -26,6 +26,8 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 10 | Settings file and live reload | [m10-settings.md](plans/m10-settings.md) | 3 | shipped |
 | 11 | Exports: Markdown, single-file JSON, PNG | [m11-exports.md](plans/m11-exports.md) | 1 (PNG needs 4) | shipped |
 | 12 | Hardening and acceptance pass | [m12-hardening.md](plans/m12-hardening.md) | all | shipped |
+| 13 | Paper look: palette, canvas, tool pill, details card | [m13-paper-look.md](plans/m13-paper-look.md) | 12 | draft |
+| 14 | Paper chrome: sidebar cards, title bar, app icon | [m14-paper-chrome.md](plans/m14-paper-chrome.md) | 13 | draft |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:
 
@@ -55,6 +57,10 @@ Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can
   renderer.
 - **12. Hardening.** Undo audit, keybind-suppression audit, 500-region performance check, and a walk of the
   full spec Section 13 list.
+- **13 and 14. Paper studio.** The app's own look, after the v1 acceptance pass: a warm paper desk with the screen
+  as a rounded sheet, regions tinted by kind family, a fixed indigo accent, a night paper dark mode, a clickable
+  tool pill, the details panel and sidebar as cards, screen thumbnails, and an app icon. Chosen from three mocked
+  directions in the project thread; 13 is the canvas and panel, 14 the window chrome.
 
 ---
 
