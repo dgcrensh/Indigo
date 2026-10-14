@@ -33,6 +33,11 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 17 | Edits that cost what they change: multi-region moves, paste, undo snapshots | [m17-edit-scaling.md](plans/m17-edit-scaling.md) | 2, 9 | shipped |
 | 18 | Autosave that writes what changed | [m18-autosave-cost.md](plans/m18-autosave-cost.md) | 1, 3 | shipped |
 | 19 | A grid that pans without redrawing | [m19-grid-tiling.md](plans/m19-grid-tiling.md) | 13, 15 | shipped |
+| 20 | Lay out only what is on screen | [m20-visible-layout.md](plans/m20-visible-layout.md) | 15, 19 | draft |
+| 21 | Zoom without hitches | [m21-zoom-runs.md](plans/m21-zoom-runs.md) | 16, 20 | draft |
+| 22 | Placing many regions, and finding one, without scanning everything | [m22-placement-scaling.md](plans/m22-placement-scaling.md) | 17 | draft |
+| 23 | Autosave that skips screens nobody touched | [m23-autosave-dirty-screens.md](plans/m23-autosave-dirty-screens.md) | 18 | draft |
+| 24 | A sidebar that redraws only what changed | [m24-sidebar-cost.md](plans/m24-sidebar-cost.md) | 16 | draft |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:
 
@@ -70,6 +75,12 @@ Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can
   (`scripts/bench.sh --profile`). 17 makes moving, pasting and shrinking many regions cost one layout per command
   instead of one per region, and records undo for what changed rather than the whole screen; 18 skips writing
   unchanged screens on autosave and speeds up the JSON writer. Independent of each other.
+- **20 to 24. Measured responsiveness.** From a profile of the running app on a MacBook Air M1
+  (`real-hardware-profile.md` in the project files). 20 lays out and keeps in the layer tree only the regions near
+  the view, and adds on-screen timings that include the Core Animation commit; 21 draws a pinch with a transform and
+  fits titles over several frames after it; 22 finds parents and regions without scanning every region; 23 skips
+  untouched screens on autosave; 24 redraws only the sidebar cards that changed. 21 needs 20; 22, 23 and 24 are
+  independent of the others.
 
 ---
 
