@@ -54,6 +54,17 @@ public final class Region {
 
     /// This region and every descendant, depth first in sibling order.
     public var subtree: [Region] {
-        [self] + children.flatMap(\.subtree)
+        Self.depthFirst([self])
+    }
+
+    /// `roots` and every region below them, depth first in sibling order, in one array.
+    static func depthFirst(_ roots: [Region]) -> [Region] {
+        var regions: [Region] = []
+        var stack = Array(roots.reversed())
+        while let region = stack.popLast() {
+            regions.append(region)
+            stack.append(contentsOf: region.children.reversed())
+        }
+        return regions
     }
 }

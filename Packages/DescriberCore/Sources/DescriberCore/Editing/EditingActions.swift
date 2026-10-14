@@ -30,7 +30,7 @@ public enum DeleteConfirmation {
         var seen = Set<RegionID>()
         let ids = selection.filter { index.contains($0) && seen.insert($0).inserted }
         // Regions inside another selected region are counted as inside, not as deleted in their own right.
-        let roots = ids.filter { id in !index.path(to: id).dropLast().contains { seen.contains($0.id) } }
+        let roots = ids.filter { !index.isInside($0, anyOf: seen) }
         let inside = roots.reduce(0) { $0 + index.descendants(of: $1).count }
         guard inside > 0, let first = roots.first.flatMap(index.region) else { return nil }
         let insideText = inside == 1 ? "the region inside" : "the \(inside) regions inside"

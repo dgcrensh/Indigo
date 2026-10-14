@@ -39,7 +39,8 @@ public struct CreateRegion: Command {
 
     public func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
-        let index = RegionIndex(screen: screen)
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        let index = layout.index
         let frame = grid.map { Snapping.snap(frame: self.frame, grid: $0, mode: .draw) } ?? self.frame
         guard Geometry.meetsMinimumSize(frame) else { throw EditError.belowMinimumSize(frame) }
         guard !index.contains(id) else { throw EditError.regionAlreadyExists(id) }
@@ -48,9 +49,9 @@ public struct CreateRegion: Command {
         let before = RegionLayout(screen: screen)
         let placement =
             parent.map { Parenting.Placement(parent: $0, frame: frame) }
-            ?? Parenting.placement(forDrawn: frame, excluding: nil, in: screen, offsets: scrollOffsets)
+            ?? Parenting.placement(forDrawn: frame, excluding: nil, layout: layout)
         let region = Region(id: id, title: title, kind: kind, frame: placement.frame)
-        Parenting.attach(region, toParent: placement.parent, in: screen)
+        Parenting.attach(region, toParent: placement.parent.flatMap(index.region), in: screen)
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
     }
 }
@@ -84,11 +85,11 @@ public struct MoveRegions: Command {
 
     public func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
-        let index = RegionIndex(screen: screen)
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        let index = layout.index
         let roots = try topmostRegions(regions, in: index)
         guard let first = roots.first else { throw EditError.nothingToDo }
 
-        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
         let delta = Self.snappedDelta(
             moving: layout.drawnFrame(of: first.id) ?? first.frame, dx: dx, dy: dy, grid: grid)
         // A region nobody can see keeps its scrolling parent, so nudging a hidden region doesn't move it out.
@@ -96,14 +97,12 @@ public struct MoveRegions: Command {
 
         let before = RegionLayout(screen: screen)
         for root in roots {
-            for region in root.subtree {
+            guard let position = index.position(of: root.id) else { continue }
+            for region in index.regions[position...index[position: position].subtreeEnd] {
                 region.frame = region.frame.offsetBy(dx: delta.x, dy: delta.y)
             }
         }
-        for root in roots {
-            Parenting.reparentAfterChange(
-                of: root.id, in: screen, offsets: scrollOffsets, keepingParent: hidden.contains(root.id))
-        }
+        Parenting.place(roots.map(\.id), in: screen, offsets: scrollOffsets, keepingParents: hidden)
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
     }
 
@@ -304,10 +303,14 @@ public struct PasteRegions: Command {
         guard !pasted.isEmpty else { throw EditError.nothingToDo }
 
         let before = RegionLayout(screen: screen)
-        for region in pasted {
-            Parenting.attach(region, toParent: parent, in: screen)
-            if parent == nil {
-                Parenting.place(region.id, in: screen, offsets: scrollOffsets)
+        if let parent = parent.flatMap(index.region) {
+            parent.children.append(contentsOf: pasted)
+        } else {
+            // Each copy lands on top of the screen and is placed before the next is added, against one layout.
+            var placer = Parenting.Placer(screen: screen, offsets: scrollOffsets)
+            for region in pasted {
+                placer.attachTopLevel(region)
+                placer.place(region.id)
             }
         }
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
@@ -379,7 +382,5 @@ func topmostRegions(_ ids: [RegionID], in index: RegionIndex) throws -> [Region]
         guard let region = index.region(id) else { throw EditError.regionNotFound(id) }
         regions.append(region)
     }
-    return regions.filter { region in
-        !index.path(to: region.id).dropLast().contains { seen.contains($0.id) }
-    }
+    return regions.filter { !index.isInside($0.id, anyOf: seen) }
 }

@@ -35,18 +35,27 @@ public enum Parenting {
         forDrawn drawn: Frame, excluding: RegionID?, layout: ScrollLayout, keeping: RegionID? = nil
     ) -> Placement {
         let index = layout.index
-        var best: (region: Region, area: Int)?
-        for region in index.regions {
-            if let excluding, index.isDescendant(region.id, of: excluding) { continue }
-            guard let content = layout.drawnContentArea(of: region.id), content.contains(drawn) else { continue }
-            if region.scroll != nil, region.id != keeping {
-                guard let frame = layout.drawnFrame(of: region.id), frame.intersects(drawn) else { continue }
-            }
-            // Later in the walk draws on top, so `<=` lets an equal-size later region win the tie.
-            if let current = best, current.area < region.frame.area { continue }
-            best = (region, region.frame.area)
+        let regions = index.regions
+        // The excluded region's subtree is one run of draw order, skipped as a whole.
+        var skipped = regions.endIndex..<regions.endIndex
+        if let excluding, let position = index.position(of: excluding) {
+            skipped = position..<(index[position: position].subtreeEnd + 1)
         }
-        let parent = best?.region.id
+        var best: (position: Int, area: Int)?
+        for range in [regions.startIndex..<skipped.lowerBound, skipped.upperBound..<regions.endIndex] {
+            for position in range {
+                let region = regions[position]
+                guard layout.drawnContentArea(at: position).contains(drawn) else { continue }
+                if region.scroll != nil, region.id != keeping {
+                    guard layout.drawnFrame(at: position).intersects(drawn) else { continue }
+                }
+                // Later in the walk draws on top, so `<=` lets an equal-size later region win the tie.
+                let area = region.frame.area
+                if let current = best, current.area < area { continue }
+                best = (position, area)
+            }
+        }
+        let parent = best.map { regions[$0.position].id }
         return Placement(parent: parent, frame: layout.fileFrame(forDrawn: drawn, inParent: parent))
     }
 
@@ -56,56 +65,109 @@ public enum Parenting {
     public static func reparentAfterChange(
         of id: RegionID, in screen: Screen, offsets: [RegionID: ScrollOffset] = [:], keepingParent: Bool = false
     ) {
-        place(id, in: screen, offsets: offsets, keepingParent: keepingParent)
-        guard let region = RegionIndex(screen: screen).region(id) else { return }
-        replaceChildrenOutsideContent(of: region, in: screen, offsets: offsets)
+        place([id], in: screen, offsets: offsets, keepingParents: keepingParent ? [id] : [])
+    }
+
+    /// Applies the rule to each of `ids` in turn, as `reparentAfterChange` does to one, against one layout of the
+    /// screen that is rebuilt only after a placement changed the tree. `keepingParents` are the regions whose
+    /// scrolling parents stay candidates.
+    static func place(
+        _ ids: [RegionID], in screen: Screen, offsets: [RegionID: ScrollOffset], keepingParents: Set<RegionID> = []
+    ) {
+        var placer = Placer(screen: screen, offsets: offsets)
+        for id in ids {
+            placer.placeAfterChange(id, keepingParent: keepingParents.contains(id))
+        }
     }
 
     /// Applies the rule to each child of `region` that its content area no longer holds.
     static func replaceChildrenOutsideContent(
         of region: Region, in screen: Screen, offsets: [RegionID: ScrollOffset]
     ) {
-        let area = region.contentArea
-        for child in region.children where !area.contains(child.frame) {
-            place(child.id, in: screen, offsets: offsets)
-        }
+        var placer = Placer(screen: screen, offsets: offsets)
+        placer.replaceChildrenOutsideContent(of: region)
     }
 
-    /// Moves `id` under the parent the rule picks for where it is drawn, if that differs from its current parent,
-    /// and moves its subtree so it stays where it is drawn.
-    static func place(
-        _ id: RegionID, in screen: Screen, offsets: [RegionID: ScrollOffset] = [:], keepingParent: Bool = false
-    ) {
-        let layout = ScrollLayout(screen: screen, offsets: offsets)
-        let index = layout.index
-        guard let entry = index[id], let drawn = layout.drawnFrame(of: id) else { return }
-        let placement = placement(
-            forDrawn: drawn, excluding: id, layout: layout, keeping: keepingParent ? entry.parent : nil)
-        let dx = placement.frame.x - entry.region.frame.x
-        let dy = placement.frame.y - entry.region.frame.y
-        if dx != 0 || dy != 0 {
-            for region in entry.region.subtree {
-                region.frame = region.frame.offsetBy(dx: dx, dy: dy)
+    /// Places regions one after another against one `ScrollLayout`. A placement that keeps a region's parent keeps
+    /// its frame too (its frame in the file is its drawn frame plus its parent's content shift), so the layout stays
+    /// valid and is rebuilt only after a placement moved a region to a new parent.
+    struct Placer {
+        let screen: Screen
+        let offsets: [RegionID: ScrollOffset]
+        /// Nil when the tree changed since it was built.
+        private var cached: ScrollLayout?
+
+        init(screen: Screen, offsets: [RegionID: ScrollOffset]) {
+            self.screen = screen
+            self.offsets = offsets
+        }
+
+        private mutating func layout() -> ScrollLayout {
+            if let cached { return cached }
+            let layout = ScrollLayout(screen: screen, offsets: offsets)
+            cached = layout
+            return layout
+        }
+
+        /// Places `id`, then each of its children that no longer fits its content area.
+        mutating func placeAfterChange(_ id: RegionID, keepingParent: Bool = false) {
+            guard let region = layout().index.region(id) else { return }
+            place(id, keepingParent: keepingParent)
+            replaceChildrenOutsideContent(of: region)
+        }
+
+        mutating func replaceChildrenOutsideContent(of region: Region) {
+            let area = region.contentArea
+            for child in region.children where !area.contains(child.frame) {
+                place(child.id)
             }
         }
-        guard placement.parent != entry.parent else { return }
-        detach(id, in: screen, index: index)
-        attach(entry.region, toParent: placement.parent, in: screen)
+
+        /// Appends `region` as the last top-level region, keeping the layout current.
+        mutating func attachTopLevel(_ region: Region) {
+            screen.regions.append(region)
+            cached?.appendTopLevel(region)
+        }
+
+        /// Moves `id` under the parent the rule picks for where it is drawn, if that differs from its current
+        /// parent, and moves its subtree so it stays where it is drawn.
+        mutating func place(_ id: RegionID, keepingParent: Bool = false) {
+            let layout = layout()
+            let index = layout.index
+            guard let position = index.position(of: id) else { return }
+            let entry = index[position: position]
+            let placement = Parenting.placement(
+                forDrawn: layout.drawnFrame(at: position), excluding: id, layout: layout,
+                keeping: keepingParent ? entry.parent : nil)
+            let dx = placement.frame.x - entry.region.frame.x
+            let dy = placement.frame.y - entry.region.frame.y
+            if dx != 0 || dy != 0 {
+                for region in index.regions[position...entry.subtreeEnd] {
+                    region.frame = region.frame.offsetBy(dx: dx, dy: dy)
+                }
+                cached = nil
+            }
+            guard placement.parent != entry.parent else { return }
+            detach(id, in: screen, index: index)
+            attach(entry.region, toParent: placement.parent.flatMap(index.region), in: screen)
+            cached = nil
+        }
     }
 
     /// Removes `id` from its sibling list.
     static func detach(_ id: RegionID, in screen: Screen, index: RegionIndex) {
+        guard let region = index.region(id) else { return }
         if let parent = index.parent(of: id) {
-            parent.children.removeAll { $0.id == id }
+            parent.children.removeAll { $0 === region }
         } else {
-            screen.regions.removeAll { $0.id == id }
+            screen.regions.removeAll { $0 === region }
         }
     }
 
     /// Appends `region` as the last child of `parent`, or as the last top-level region.
-    static func attach(_ region: Region, toParent parent: RegionID?, in screen: Screen) {
-        if let parent, let parentRegion = RegionIndex(screen: screen).region(parent) {
-            parentRegion.children.append(region)
+    static func attach(_ region: Region, toParent parent: Region?, in screen: Screen) {
+        if let parent {
+            parent.children.append(region)
         } else {
             screen.regions.append(region)
         }
