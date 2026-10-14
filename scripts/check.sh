@@ -2,7 +2,7 @@
 # Runs every check a PR must pass, in order, stopping at the first failure.
 #
 #   scripts/check.sh           core tests, format check, app build and tests
-#   scripts/check.sh --core    core tests and format check only (no Xcode needed)
+#   scripts/check.sh --core    core tests, example project, and format check only (no Xcode needed)
 #   scripts/check.sh --no-app  same as --core
 set -euo pipefail
 
@@ -35,6 +35,9 @@ format_paths=(
 
 stage "Core tests"
 swift test --package-path Packages/DescriberCore
+
+stage "Example project (Schema/examples/acme.uidesc re-saves byte for byte and matches the schema)"
+swift test --package-path Packages/DescriberCore --filter ExampleProjectTests
 
 stage "Format check"
 if swift format --version > /dev/null 2>&1; then

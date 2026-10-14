@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "name": "Acme",
+  "units": "points",
+  "screens": [
+    {
+      "id": "6513270e-269e-4d37-b2a7-4de452e6b438",
+      "name": "Login",
+      "file": "screens/login.json"
+    },
+    {
+      "id": "d23f0824-128b-4f33-8c5c-7fd0a6a3a450",
+      "name": "Login (Desktop)",
+      "file": "screens/login-desktop.json"
+    },
+    {
+      "id": "9531985d-5d9d-49f8-9818-e811892f902b",
+      "name": "Reset Password",
+      "file": "screens/reset-password.json"
+    },
+    {
+      "id": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+      "name": "Settings",
+      "file": "screens/settings.json"
+    },
+    {
+      "id": "6b0d549b-6f03-475a-9600-a35a099950d8",
+      "name": "Account Menu",
+      "file": "screens/account-menu.json"
+    }
+  ],
+  "variantGroups": [
+    {
+      "name": "Login",
+      "screens": [
+        "6513270e-269e-4d37-b2a7-4de452e6b438",
+        "d23f0824-128b-4f33-8c5c-7fd0a6a3a450"
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 How milestone 1 of the [v1 roadmap](../v1-roadmap.md) is built. Builds on [m0-scaffold.md](m0-scaffold.md).
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 
@@ -108,5 +108,5 @@ Nothing is visible in the app yet; this is the format every later milestone save
 | Question | Default if unanswered | Answer |
 | --- | --- | --- |
 | Is a JSON Schema for the format wanted in v1? It isn't in the spec, but helps agents write valid files. | Yes, as in step 6. | |
-| May the core take a test-only dependency for schema validation? | Yes, a test-only dependency on a JSON Schema validator package; the library itself keeps no dependencies. | |
+| May the core take a test-only dependency for schema validation? | Yes, a test-only dependency on a JSON Schema validator package; the library itself keeps no dependencies. | Built without one: the only maintained Swift validator pins its own dependencies by revision, which SwiftPM rejects for versioned use, so the tests carry a small validator for the keywords the schema uses. |
 | Should `units` stay in `project.json` even though it is always `points`? | Yes, as in spec 3.2. | |
