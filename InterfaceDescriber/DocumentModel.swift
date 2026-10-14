@@ -10,6 +10,12 @@ final class DocumentModel {
     var session: EditSession
     /// The screen the canvas shows. Window state only; saving it arrives with screen management (milestone 8).
     var activeScreenID: ScreenID?
+    /// Changes after every command, undo, redo and replacement of the project, so views that draw the model (the
+    /// canvas) know to draw again. Regions aren't observable themselves.
+    private(set) var revision = 0
+    /// Whether drawing, moving and resizing snap to the grid, which the canvas then shows. Toggled with `S` from
+    /// milestone 5.
+    var snappingEnabled = true
 
     init(project: Project) {
         session = EditSession(project: project)
@@ -28,5 +34,11 @@ final class DocumentModel {
     func replaceProject(with project: Project) {
         session = EditSession(project: project)
         activeScreenID = project.initialScreen
+        noteChange()
+    }
+
+    /// Records that the project changed.
+    func noteChange() {
+        revision += 1
     }
 }

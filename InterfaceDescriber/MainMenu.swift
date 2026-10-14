@@ -13,6 +13,9 @@ enum MainMenu {
         let windowMenu = windowMenu()
         mainMenu.addItem(submenuItem(windowMenu))
         NSApplication.shared.windowsMenu = windowMenu
+        #if DEBUG
+            mainMenu.addItem(submenuItem(debugMenu()))
+        #endif
         let helpMenu = NSMenu(title: "Help")
         mainMenu.addItem(submenuItem(helpMenu))
         NSApplication.shared.helpMenu = helpMenu
@@ -109,6 +112,30 @@ enum MainMenu {
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
+        menu.addItem(
+            withTitle: "Zoom In",
+            action: #selector(DocumentWindowController.zoomIn(_:)),
+            keyEquivalent: "+"
+        )
+        // Cmd = is the same key as Cmd + without Shift, so it zooms in too.
+        let zoomInEquals = menu.addItem(
+            withTitle: "Zoom In",
+            action: #selector(DocumentWindowController.zoomIn(_:)),
+            keyEquivalent: "="
+        )
+        zoomInEquals.isHidden = true
+        zoomInEquals.allowsKeyEquivalentWhenHidden = true
+        menu.addItem(
+            withTitle: "Zoom Out",
+            action: #selector(DocumentWindowController.zoomOut(_:)),
+            keyEquivalent: "-"
+        )
+        menu.addItem(
+            withTitle: "Actual Size",
+            action: #selector(DocumentWindowController.actualSize(_:)),
+            keyEquivalent: "0"
+        )
+        menu.addItem(.separator())
         let sidebar = menu.addItem(
             withTitle: "Toggle Sidebar",
             action: #selector(NSSplitViewController.toggleSidebar(_:)),
@@ -117,6 +144,19 @@ enum MainMenu {
         sidebar.keyEquivalentModifierMask = [.control, .command]
         return menu
     }
+
+    #if DEBUG
+        /// Tools for checking the app by hand, in debug builds only.
+        private static func debugMenu() -> NSMenu {
+            let menu = NSMenu(title: "Debug")
+            menu.addItem(
+                withTitle: "New 500-Region Document",
+                action: #selector(AppDelegate.newStressTestDocument(_:)),
+                keyEquivalent: ""
+            )
+            return menu
+        }
+    #endif
 
     private static func windowMenu() -> NSMenu {
         let menu = NSMenu(title: "Window")

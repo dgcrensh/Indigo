@@ -20,6 +20,21 @@ final class MainMenuTests: XCTestCase {
     }
 
     @MainActor
+    func testViewMenuHasTheZoomCommands() throws {
+        let zoomIn = try item("Zoom In", in: "View")
+        XCTAssertEqual(zoomIn.action, #selector(DocumentWindowController.zoomIn(_:)))
+        XCTAssertEqual(zoomIn.keyEquivalent, "+")
+        XCTAssertEqual(zoomIn.keyEquivalentModifierMask, .command)
+        let zoomOut = try item("Zoom Out", in: "View")
+        XCTAssertEqual(zoomOut.action, #selector(DocumentWindowController.zoomOut(_:)))
+        XCTAssertEqual(zoomOut.keyEquivalent, "-")
+        let actualSize = try item("Actual Size", in: "View")
+        XCTAssertEqual(actualSize.action, #selector(DocumentWindowController.actualSize(_:)))
+        XCTAssertEqual(actualSize.keyEquivalent, "0")
+        XCTAssertEqual(actualSize.keyEquivalentModifierMask, .command)
+    }
+
+    @MainActor
     func testControlCommandSTogglesTheSidebar() throws {
         let toggle = try item("Toggle Sidebar", in: "View")
         XCTAssertEqual(toggle.action, #selector(NSSplitViewController.toggleSidebar(_:)))

@@ -47,6 +47,7 @@ final class Document: NSDocument {
     /// Applies `command` to the project as one undo step named after it. Every edit goes through here.
     func perform(_ command: Command) throws {
         try model.session.perform(command)
+        model.noteChange()
         registerUndoStep(named: command.actionName)
     }
 
@@ -67,10 +68,12 @@ final class Document: NSDocument {
             if undoManager.isUndoing {
                 guard session.canUndo else { return }
                 try session.undo()
+                model.noteChange()
                 registerUndoStep(named: session.redoActionName ?? "")
             } else {
                 guard session.canRedo else { return }
                 try session.redo()
+                model.noteChange()
                 registerUndoStep(named: session.undoActionName ?? "")
             }
         } catch {

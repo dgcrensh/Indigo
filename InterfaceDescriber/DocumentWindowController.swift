@@ -5,8 +5,10 @@ import SwiftUI
 /// the right for the details panel (milestone 6).
 final class DocumentWindowController: NSWindowController {
     let splitViewController = NSSplitViewController()
+    let canvasController: CanvasViewController
 
     init(model: DocumentModel) {
+        canvasController = CanvasViewController(model: model)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -22,9 +24,7 @@ final class DocumentWindowController: NSWindowController {
         sidebar.isCollapsed = true
         sidebar.minimumThickness = 180
 
-        let canvas = NSSplitViewItem(
-            viewController: NSHostingController(rootView: CanvasPlaceholder(model: model))
-        )
+        let canvas = NSSplitViewItem(viewController: canvasController)
 
         let inspector = NSSplitViewItem(inspectorWithViewController: NSHostingController(rootView: Color.clear))
         inspector.isCollapsed = true
@@ -54,5 +54,20 @@ final class DocumentWindowController: NSWindowController {
 
     var inspectorItem: NSSplitViewItem {
         splitViewController.splitViewItems[2]
+    }
+
+    // MARK: Zoom
+    // Here rather than on the canvas so the View menu reaches them whichever pane has focus.
+
+    @objc func zoomIn(_ sender: Any?) {
+        canvasController.zoomIn()
+    }
+
+    @objc func zoomOut(_ sender: Any?) {
+        canvasController.zoomOut()
+    }
+
+    @objc func actualSize(_ sender: Any?) {
+        canvasController.actualSize()
     }
 }

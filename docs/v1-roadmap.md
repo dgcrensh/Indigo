@@ -17,7 +17,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 1 | Data model and file format | [m1-file-format.md](plans/m1-file-format.md) | 0 | shipped |
 | 2 | Command layer, parenting, snapping | [m2-commands.md](plans/m2-commands.md) | 1 | shipped |
 | 3 | Document and app shell | [m3-document-shell.md](plans/m3-document-shell.md) | 1, 2 | shipped |
-| 4 | Canvas rendering (starts with a 500-region performance spike) | not written | 3 | |
+| 4 | Canvas rendering (starts with a 500-region performance spike) | [m4-canvas-rendering.md](plans/m4-canvas-rendering.md) | 3 | shipped |
 | 5 | Tools, gestures, toasts, keybind registry | not written | 4 | |
 | 6 | Details panel | not written | 5 | |
 | 7 | Selection and editing | not written | 5 | |
@@ -44,7 +44,8 @@ Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can
   with the spec Section 9 defaults.
 - **6. Details panel.** The SwiftUI form in spec Section 6, the slide-in and zoom-to-fit animation, Return, Tab
   and Escape behaviour, blank-title rules, keybind suspension while editing text, switching regions.
-- **7. Selection and editing.** Everything in spec Section 7.
+- **7. Selection and editing.** Everything in spec Section 7, plus showing descriptions on the canvas with `D`
+  and `Shift-D` (spec Sections 4 and 9), since `D` acts on the selection.
 - **8. Screens, viewports, variants, links.** Everything in spec Section 8.
 - **9. Scrolling.** Scroll settings, drawing the content area, scroll-in-region, clipping, parenting against the
   content area.
