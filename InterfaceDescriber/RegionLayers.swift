@@ -15,6 +15,7 @@ final class RegionLayers {
     private var frame = Frame(x: 0, y: 0, w: 0, h: 0)
     private var parts: [Frame] = []
     private var titleWidth: CGFloat = 0
+    private var colors: CanvasColors?
 
     init() {
         box.anchorPoint = .zero
@@ -29,15 +30,21 @@ final class RegionLayers {
 
     /// Takes the region's title and frame, and the parts of it outside `bounds`.
     func update(from region: Region, bounds: Frame, titleWidths: TitleWidths) {
-        frame = region.frame
-        parts = bounds.contains(frame) ? [] : frame.parts(outside: bounds)
         if title.string as? String != region.title {
             title.string = region.title
         }
         titleWidth = titleWidths.width(of: region.title)
+        setFrame(region.frame, bounds: bounds)
+    }
+
+    /// Draws the region at `frame`, its own or one a gesture previews. Call `layout(zoom:)` afterwards.
+    func setFrame(_ frame: Frame, bounds: Frame) {
+        self.frame = frame
+        parts = bounds.contains(frame) ? [] : frame.parts(outside: bounds)
         while tints.count < parts.count {
             let tint = CALayer()
             tint.anchorPoint = .zero
+            tint.backgroundColor = colors?.outside
             box.insertSublayer(tint, below: title)
             tints.append(tint)
         }
@@ -46,14 +53,27 @@ final class RegionLayers {
         }
     }
 
+    /// Whether the region is selected, which draws its border in the accent color and thicker.
+    var isSelected = false {
+        didSet {
+            if isSelected != oldValue { applyBorder() }
+        }
+    }
+
     func apply(_ colors: CanvasColors, scale: CGFloat) {
+        self.colors = colors
         box.backgroundColor = colors.regionFill
-        box.borderColor = colors.regionBorder
+        applyBorder()
         title.foregroundColor = colors.title
         title.contentsScale = scale
         for tint in tints {
             tint.backgroundColor = colors.outside
         }
+    }
+
+    private func applyBorder() {
+        box.borderColor = isSelected ? colors?.selection : colors?.regionBorder
+        box.borderWidth = isSelected ? 2 : 1
     }
 
     /// Sizes the layers for `zoom`. A title that fits keeps its natural width, so zooming redraws only the titles

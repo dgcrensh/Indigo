@@ -42,3 +42,37 @@ final class MainMenuTests: XCTestCase {
         XCTAssertEqual(toggle.keyEquivalentModifierMask, [.control, .command])
     }
 }
+
+extension MainMenuTests {
+    @MainActor
+    func testToolsMenuHasTheToolsSnappingAndGridSize() throws {
+        let expected: [(String, Selector, String)] = [
+            ("Select Tool", #selector(DocumentWindowController.chooseSelectTool(_:)), "v"),
+            ("Region Tool", #selector(DocumentWindowController.chooseRegionTool(_:)), "r"),
+            ("Write Tool", #selector(DocumentWindowController.chooseWriteTool(_:)), "w"),
+            ("Snap to Grid", #selector(DocumentWindowController.toggleSnapping(_:)), "s"),
+            ("Grid Size…", #selector(DocumentWindowController.showGridSize(_:)), "g"),
+        ]
+        let menu = try XCTUnwrap(MainMenu.make().items.first { $0.title == "Tools" }?.submenu)
+        for (title, action, key) in expected {
+            let item = try XCTUnwrap(menu.items.first { $0.title == title }, "Tools > \(title) is missing")
+            XCTAssertEqual(item.action, action, title)
+            XCTAssertEqual(item.keyEquivalent, key, title)
+            XCTAssertEqual(item.keyEquivalentModifierMask, [], title)
+        }
+    }
+
+    @MainActor
+    func testEditMenuKeysComeFromTheRegistry() throws {
+        let menu = try XCTUnwrap(MainMenu.make().items.first { $0.title == "Edit" }?.submenu)
+        let undo = try XCTUnwrap(menu.items.first { $0.title == "Undo" })
+        XCTAssertEqual(undo.keyEquivalent, "z")
+        XCTAssertEqual(undo.keyEquivalentModifierMask, .command)
+        let redo = try XCTUnwrap(menu.items.first { $0.title == "Redo" })
+        XCTAssertEqual(redo.keyEquivalent, "z")
+        XCTAssertEqual(redo.keyEquivalentModifierMask, [.command, .shift])
+        let paste = try XCTUnwrap(menu.items.first { $0.title == "Paste" })
+        XCTAssertEqual(paste.keyEquivalent, "v")
+        XCTAssertEqual(paste.keyEquivalentModifierMask, .command)
+    }
+}

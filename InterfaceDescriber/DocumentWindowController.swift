@@ -1,4 +1,5 @@
 import AppKit
+import DescriberCore
 import SwiftUI
 
 /// A document window: the screen sidebar on the left (hidden by default), the canvas in the middle, and a slot on
@@ -69,5 +70,54 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func actualSize(_ sender: Any?) {
         canvasController.actualSize()
+    }
+
+    // MARK: Tools
+
+    @objc func chooseSelectTool(_ sender: Any?) {
+        canvasController.choose(.select)
+    }
+
+    @objc func chooseRegionTool(_ sender: Any?) {
+        canvasController.choose(.region)
+    }
+
+    @objc func chooseWriteTool(_ sender: Any?) {
+        canvasController.choose(.write)
+    }
+
+    @objc func toggleSnapping(_ sender: Any?) {
+        canvasController.toggleSnapping()
+    }
+
+    @objc func showGridSize(_ sender: Any?) {
+        canvasController.toggleGridSizePopover()
+    }
+
+    /// Whether a text field in the window is being edited, which turns off the canvas and tool keybinds (spec 6.3).
+    var isEditingText: Bool {
+        window?.firstResponder is NSText
+    }
+}
+
+extension DocumentWindowController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let model = canvasController.model
+        switch menuItem.action {
+        case #selector(chooseSelectTool(_:)):
+            menuItem.state = model.tool == .select ? .on : .off
+        case #selector(chooseRegionTool(_:)):
+            menuItem.state = model.tool == .region ? .on : .off
+        case #selector(chooseWriteTool(_:)):
+            menuItem.state = model.tool == .write ? .on : .off
+        case #selector(toggleSnapping(_:)):
+            menuItem.state = model.snappingEnabled ? .on : .off
+        case #selector(showGridSize(_:)):
+            break
+        default:
+            return true
+        }
+        // A bare-key equivalent such as R would otherwise take the key from the text being typed.
+        return !(isEditingText && menuItem.keyEquivalentModifierMask.isDisjoint(with: [.command, .control]))
     }
 }

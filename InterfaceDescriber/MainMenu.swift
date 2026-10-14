@@ -1,4 +1,5 @@
 import AppKit
+import DescriberCore
 
 /// Builds the menu bar in code, since the app has no storyboard or nib. Each milestone adds the items for the
 /// features it ships; this skeleton has only the items that work now.
@@ -10,6 +11,7 @@ enum MainMenu {
         mainMenu.addItem(submenuItem(fileMenu()))
         mainMenu.addItem(submenuItem(editMenu()))
         mainMenu.addItem(submenuItem(viewMenu()))
+        mainMenu.addItem(submenuItem(toolsMenu()))
         let windowMenu = windowMenu()
         mainMenu.addItem(submenuItem(windowMenu))
         NSApplication.shared.windowsMenu = windowMenu
@@ -20,6 +22,17 @@ enum MainMenu {
         mainMenu.addItem(submenuItem(helpMenu))
         NSApplication.shared.helpMenu = helpMenu
         return mainMenu
+    }
+
+    /// An item whose key equivalent comes from the keybind registry. `index` picks one of the action's combinations.
+    @discardableResult
+    private static func addItem(
+        to menu: NSMenu, _ title: String, action: Selector, keybind: KeyAction, index: Int = 0
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.setKeyEquivalent(for: keybind, index: index)
+        menu.addItem(item)
+        return item
     }
 
     private static func submenuItem(_ menu: NSMenu) -> NSMenuItem {
@@ -99,49 +112,53 @@ enum MainMenu {
 
     private static func editMenu() -> NSMenu {
         let menu = NSMenu(title: "Edit")
-        menu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = menu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-        redo.keyEquivalentModifierMask = [.command, .shift]
+        addItem(to: menu, "Undo", action: Selector(("undo:")), keybind: .undo)
+        addItem(to: menu, "Redo", action: Selector(("redo:")), keybind: .redo)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        addItem(to: menu, "Copy", action: #selector(NSText.copy(_:)), keybind: .copy)
+        addItem(to: menu, "Paste", action: #selector(NSText.paste(_:)), keybind: .paste)
+        addItem(to: menu, "Select All", action: #selector(NSText.selectAll(_:)), keybind: .selectAll)
         return menu
     }
 
     private static func viewMenu() -> NSMenu {
         let menu = NSMenu(title: "View")
-        menu.addItem(
-            withTitle: "Zoom In",
-            action: #selector(DocumentWindowController.zoomIn(_:)),
-            keyEquivalent: "+"
-        )
+        addItem(to: menu, "Zoom In", action: #selector(DocumentWindowController.zoomIn(_:)), keybind: .zoomIn)
         // Cmd = is the same key as Cmd + without Shift, so it zooms in too.
-        let zoomInEquals = menu.addItem(
-            withTitle: "Zoom In",
-            action: #selector(DocumentWindowController.zoomIn(_:)),
-            keyEquivalent: "="
-        )
+        let zoomInEquals = addItem(
+            to: menu, "Zoom In", action: #selector(DocumentWindowController.zoomIn(_:)), keybind: .zoomIn, index: 1)
         zoomInEquals.isHidden = true
         zoomInEquals.allowsKeyEquivalentWhenHidden = true
-        menu.addItem(
-            withTitle: "Zoom Out",
-            action: #selector(DocumentWindowController.zoomOut(_:)),
-            keyEquivalent: "-"
-        )
-        menu.addItem(
-            withTitle: "Actual Size",
-            action: #selector(DocumentWindowController.actualSize(_:)),
-            keyEquivalent: "0"
-        )
+        addItem(to: menu, "Zoom Out", action: #selector(DocumentWindowController.zoomOut(_:)), keybind: .zoomOut)
+        addItem(
+            to: menu, "Actual Size", action: #selector(DocumentWindowController.actualSize(_:)), keybind: .actualSize)
         menu.addItem(.separator())
-        let sidebar = menu.addItem(
-            withTitle: "Toggle Sidebar",
-            action: #selector(NSSplitViewController.toggleSidebar(_:)),
-            keyEquivalent: "s"
-        )
-        sidebar.keyEquivalentModifierMask = [.control, .command]
+        addItem(
+            to: menu, "Toggle Sidebar", action: #selector(NSSplitViewController.toggleSidebar(_:)),
+            keybind: .toggleSidebar)
+        return menu
+    }
+
+    /// The tools, snapping and the grid. Their keys have no modifiers, so the window controller turns them off while
+    /// text is being edited.
+    private static func toolsMenu() -> NSMenu {
+        let menu = NSMenu(title: "Tools")
+        addItem(
+            to: menu, "Select Tool", action: #selector(DocumentWindowController.chooseSelectTool(_:)),
+            keybind: .selectTool)
+        addItem(
+            to: menu, "Region Tool", action: #selector(DocumentWindowController.chooseRegionTool(_:)),
+            keybind: .regionTool)
+        addItem(
+            to: menu, "Write Tool", action: #selector(DocumentWindowController.chooseWriteTool(_:)),
+            keybind: .writeTool)
+        menu.addItem(.separator())
+        addItem(
+            to: menu, "Snap to Grid", action: #selector(DocumentWindowController.toggleSnapping(_:)),
+            keybind: .toggleSnapping)
+        addItem(
+            to: menu, "Grid Size…", action: #selector(DocumentWindowController.showGridSize(_:)), keybind: .gridSize)
         return menu
     }
 
