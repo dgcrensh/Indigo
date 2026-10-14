@@ -27,6 +27,19 @@ public final class EditSession {
         redoStack.removeAll()
     }
 
+    /// Applies `command` without recording an undo step, and returns the command that reverses it. For changes
+    /// that build up one step over time, such as a region open in the details panel; `record(_:)` adds the step when
+    /// they are done.
+    public func applyWithoutRecording(_ command: Command) throws -> Command {
+        try command.apply(to: project)
+    }
+
+    /// Records one undo step for changes already applied, given the command that reverses them. Clears redo.
+    public func record(_ inverse: Command) {
+        undoStack.append(inverse)
+        redoStack.removeAll()
+    }
+
     /// Reverses the last step. Does nothing when there is nothing to undo.
     public func undo() throws {
         guard let inverse = undoStack.last else { return }

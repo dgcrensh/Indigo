@@ -39,7 +39,7 @@ final class CanvasGestureTests: XCTestCase {
             context(fixture, tool: .region), from: CGPoint(x: 31, y: 33), to: CGPoint(x: 77, y: 58))
         let create = try XCTUnwrap(command as? CreateRegion)
         XCTAssertEqual(create.frame, Frame(x: 32, y: 32, w: 48, h: 24))
-        XCTAssertEqual(create.title, "Region")
+        XCTAssertEqual(create.title, "", "the details panel gives it a title")
         XCTAssertEqual(gesture.selection, [create.id])
         XCTAssertEqual(gesture.preview, .none)
 
@@ -267,5 +267,40 @@ final class CanvasGestureTests: XCTestCase {
         let drag = gesture(context(fixture, tool: .write), from: CGPoint(x: 50, y: 50), to: CGPoint(x: 90, y: 90))
         XCTAssertNil(drag.1)
         XCTAssertEqual(drag.0.selection, [])
+    }
+
+    // MARK: Details panel requests
+
+    private func click(
+        _ context: GestureContext, at point: CGPoint, clickCount: Int = 1
+    ) -> CanvasGesture {
+        var gesture = CanvasGesture(pressAt: point, clickCount: clickCount, context: context)
+        _ = gesture.release(at: point)
+        return gesture
+    }
+
+    func testAWriteClickRequestsOpeningOrClosingThePanel() {
+        let fixture = Fixtures.nestedProject()
+        let write = context(fixture, tool: .write)
+        XCTAssertEqual(click(write, at: CGPoint(x: 50, y: 50)).detailsRequest, .open(fixture.inner.id))
+        XCTAssertEqual(click(write, at: CGPoint(x: 250, y: 400)).detailsRequest, .close)
+    }
+
+    func testASelectDoubleClickRequestsOpeningTheRegion() {
+        let fixture = Fixtures.nestedProject()
+        let first = click(context(fixture), at: CGPoint(x: 350, y: 50))
+        XCTAssertNil(first.detailsRequest, "a single click only selects")
+        let second = click(context(fixture, selection: first.selection), at: CGPoint(x: 350, y: 50), clickCount: 2)
+        XCTAssertEqual(second.detailsRequest, .open(fixture.side.id))
+        XCTAssertEqual(second.selection, [fixture.side.id])
+        XCTAssertNil(click(context(fixture), at: CGPoint(x: 250, y: 400), clickCount: 2).detailsRequest)
+    }
+
+    func testDragsRequestNothingFromThePanel() {
+        let fixture = Fixtures.nestedProject()
+        let move = gesture(context(fixture), from: CGPoint(x: 350, y: 50), to: CGPoint(x: 380, y: 90))
+        XCTAssertNil(move.0.detailsRequest)
+        let draw = gesture(context(fixture, tool: .region), from: CGPoint(x: 31, y: 33), to: CGPoint(x: 77, y: 58))
+        XCTAssertNil(draw.0.detailsRequest, "a drawn region opens through its CreateRegion")
     }
 }

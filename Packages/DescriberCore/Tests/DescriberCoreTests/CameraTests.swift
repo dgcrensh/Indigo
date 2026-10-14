@@ -113,4 +113,20 @@ final class CameraTests: XCTestCase {
         let updated = Camera(zoom: 0.5, panX: -1, panY: 7).applied(to: state)
         XCTAssertEqual(updated, ScreenEditorState(zoom: 0.5, panX: -1, panY: 7, gridSize: 12, scrollOffsets: offsets))
     }
+
+    func testInterpolationRunsFromTheFirstCameraToTheSecond() {
+        let start = Camera(zoom: 0.5, panX: -100, panY: 20)
+        let end = Camera(zoom: 2, panX: 300, panY: 400)
+        XCTAssertEqual(Camera.interpolated(from: start, to: end, fraction: 0, viewSize: viewSize), start)
+        XCTAssertEqual(Camera.interpolated(from: start, to: end, fraction: 1, viewSize: viewSize), end)
+
+        let middle = Camera.interpolated(from: start, to: end, fraction: 0.5, viewSize: viewSize)
+        XCTAssertEqual(middle.zoom, 1, accuracy: 1e-9, "zoom moves geometrically")
+        let center = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        let startCenter = start.screenPoint(fromView: center)
+        let endCenter = end.screenPoint(fromView: center)
+        assertEqual(
+            middle.screenPoint(fromView: center),
+            CGPoint(x: (startCenter.x + endCenter.x) / 2, y: (startCenter.y + endCenter.y) / 2))
+    }
 }

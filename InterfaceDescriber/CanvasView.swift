@@ -5,7 +5,8 @@ import QuartzCore
 /// Receives the canvas's clicks, drags and keys. Points are in screen points.
 @MainActor
 protocol CanvasInteraction: AnyObject {
-    func canvasPressed(at point: CGPoint, modifiers: KeyCombo.Modifiers)
+    /// `clickCount` is 2 for the second press of a double-click.
+    func canvasPressed(at point: CGPoint, modifiers: KeyCombo.Modifiers, clickCount: Int)
     func canvasDragged(to point: CGPoint, optionHeld: Bool)
     func canvasReleased(at point: CGPoint, optionHeld: Bool)
     func canvasOptionChanged(optionHeld: Bool)
@@ -428,7 +429,9 @@ final class CanvasView: NSView {
         window?.makeFirstResponder(self)
         guard screen != nil, let interaction else { return }
         isTrackingGesture = true
-        interaction.canvasPressed(at: screenPoint(of: event), modifiers: KeyCombo.Modifiers(event.modifierFlags))
+        interaction.canvasPressed(
+            at: screenPoint(of: event), modifiers: KeyCombo.Modifiers(event.modifierFlags), clickCount: event.clickCount
+        )
     }
 
     override func mouseDragged(with event: NSEvent) {

@@ -1,14 +1,20 @@
 import AppKit
 import DescriberCore
 import Observation
+import QuartzCore
 import SwiftUI
 
 /// Shows the document's active screen in a `CanvasView`. Keeps each screen's zoom, pan and grid size in the
 /// project's editor state, draws again after every change to the project, and turns clicks and drags into commands
 /// through `CanvasGesture`.
 final class CanvasViewController: NSViewController {
-    /// Space around the viewport when a screen is fitted into the canvas.
+    /// Space around the viewport when a screen is fitted into the canvas, and around a region open in the details
+    /// panel.
     static let fitPadding = 40.0
+    /// How far zoom-to-fit zooms in on a region open in the details panel, so a small one doesn't fill the canvas.
+    static let detailsMaximumZoom = 4.0
+    /// How long the canvas takes to zoom to a region and back. Nothing animates while the window is off screen.
+    static let cameraAnimationDuration = 0.25
 
     let model: DocumentModel
     /// Performs a command as one undo step. The document sets this to `Document.perform(_:)`; without it, commands
@@ -25,6 +31,9 @@ final class CanvasViewController: NSViewController {
     /// The press, drag and release in progress.
     private var gesture: CanvasGesture?
     private var gridPopover: NSPopover?
+    /// The camera, and whether it was fitted, from before the details panel opened, to go back to when it closes.
+    private var cameraBeforeDetails: (camera: Camera, isFitted: Bool)?
+    private var cameraAnimation: Timer?
 
     init(model: DocumentModel) {
         self.model = model
@@ -90,6 +99,12 @@ final class CanvasViewController: NSViewController {
         if screenChanged {
             shownScreenID = screen?.id
             shownProject = project
+            // The details panel shows a region on the screen that was showing; commit it and keep this screen's camera.
+            stopCameraAnimation()
+            cameraBeforeDetails = nil
+            if let details = model.details, details.screen != screen?.id {
+                model.closeDetails()
+            }
             restoreCamera(for: screen)
             setSelection([])
         } else if let screen {
@@ -183,6 +198,84 @@ final class CanvasViewController: NSViewController {
         canvasView.change(to: .actualSize(centering: screen.viewportFrame.cgRect, viewSize: canvasView.bounds.size))
     }
 
+    // MARK: Details panel camera
+
+    /// Remembers the camera to go back to when the details panel closes, and stops refitting the screen while the
+    /// panel changes the canvas's size. Does nothing while the panel is already open.
+    func prepareForDetails() {
+        guard cameraBeforeDetails == nil else { return }
+        cameraBeforeDetails = (canvasView.camera, isFitted)
+        isFitted = false
+    }
+
+    /// Animates the canvas to fit `region` in a canvas `canvasWidth` wide, remembering the camera from before the
+    /// panel opened. The fitted camera isn't saved as the user's.
+    func fitForDetails(_ region: RegionID, canvasWidth: CGFloat) {
+        guard let screen = canvasView.screen, let frame = RegionIndex(screen: screen).region(region)?.frame else {
+            return
+        }
+        prepareForDetails()
+        let size = CGSize(width: max(canvasWidth, 1), height: canvasView.bounds.height)
+        let target = Camera.fitting(
+            frame.cgRect, viewSize: size, padding: Self.fitPadding, maximumZoom: Self.detailsMaximumZoom)
+        animateCamera(to: target, completion: nil)
+    }
+
+    /// Animates the canvas back to the camera it had before the details panel opened.
+    func restoreAfterDetails() {
+        guard let before = cameraBeforeDetails else { return }
+        cameraBeforeDetails = nil
+        animateCamera(to: before.camera) { [weak self] in
+            guard let self else { return }
+            self.isFitted = before.isFitted
+            if before.isFitted, let screen = self.canvasView.screen {
+                self.fit(screen)
+            } else {
+                self.save(before.camera)
+            }
+        }
+    }
+
+    var isShowingDetailsCamera: Bool {
+        cameraBeforeDetails != nil
+    }
+
+    private func animateCamera(to target: Camera, completion: (() -> Void)?) {
+        stopCameraAnimation()
+        let start = canvasView.camera
+        guard canvasView.window?.isVisible == true, start != target else {
+            canvasView.camera = target
+            completion?()
+            return
+        }
+        let began = CACurrentMediaTime()
+        let duration = Self.cameraAnimationDuration
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else {
+                    timer.invalidate()
+                    return
+                }
+                let t = min((CACurrentMediaTime() - began) / duration, 1)
+                let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+                self.canvasView.camera = Camera.interpolated(
+                    from: start, to: target, fraction: eased, viewSize: self.canvasView.bounds.size)
+                if t >= 1 {
+                    timer.invalidate()
+                    self.cameraAnimation = nil
+                    completion?()
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cameraAnimation = timer
+    }
+
+    private func stopCameraAnimation() {
+        cameraAnimation?.invalidate()
+        cameraAnimation = nil
+    }
+
     // MARK: Tools, snapping and the grid
 
     func choose(_ tool: Tool) {
@@ -262,6 +355,7 @@ final class CanvasViewController: NSViewController {
             if let performCommand {
                 try performCommand(command)
             } else {
+                model.closeDetails()
                 try model.session.perform(command)
                 model.noteChange()
             }
@@ -278,7 +372,7 @@ final class CanvasViewController: NSViewController {
 }
 
 extension CanvasViewController: CanvasInteraction {
-    func canvasPressed(at point: CGPoint, modifiers: KeyCombo.Modifiers) {
+    func canvasPressed(at point: CGPoint, modifiers: KeyCombo.Modifiers, clickCount: Int = 1) {
         guard let screen = model.activeScreen else { return }
         let context = GestureContext(
             screen: screen,
@@ -288,7 +382,7 @@ extension CanvasViewController: CanvasInteraction {
             gridSize: gridSize(for: screen),
             zoom: canvasView.camera.zoom
         )
-        gesture = CanvasGesture(pressAt: point, modifiers: modifiers, context: context)
+        gesture = CanvasGesture(pressAt: point, modifiers: modifiers, clickCount: clickCount, context: context)
         showGesture()
     }
 
@@ -306,15 +400,34 @@ extension CanvasViewController: CanvasInteraction {
         guard var gesture else { return }
         let command = gesture.release(at: point, optionHeld: optionHeld)
         self.gesture = nil
-        if let command {
+        canvasView.preview = .none
+        if let create = command as? CreateRegion {
+            // A drawn region opens in the details panel, and is recorded when the panel closes (spec 6.1).
+            do {
+                try model.openDetails(creating: create)
+            } catch {
+                NSSound.beep()
+            }
+        } else if let command {
             apply(command)
         }
-        canvasView.preview = .none
         setSelection(gesture.selection)
         canvasView.selection = gesture.selection
+        switch gesture.detailsRequest {
+        case .open(let region):
+            try? model.openDetails(for: region)
+        case .close:
+            model.closeDetails()
+        case nil:
+            break
+        }
     }
 
     func canvasKeyDown(_ combo: KeyCombo) -> Bool {
+        if combo == KeyCombo("escape"), model.details != nil {
+            model.closeDetails()
+            return true
+        }
         guard let action = model.keybinds.action(for: combo) else { return false }
         return handle(action)
     }
