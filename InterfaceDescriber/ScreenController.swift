@@ -10,7 +10,8 @@ final class ScreenController {
     /// Performs a command as one undo step. The document sets this to `Document.perform(_:)`; without it, commands
     /// go straight to the edit session.
     var performCommand: ((Command) throws -> Void)?
-    var presetStore = UserPresetStore.shared
+    /// Where user presets and the new screen viewport come from, and where presets are saved. Tests give their own.
+    var settingsStore = SettingsStore.shared
     /// The window, for sheets and for the display This Device measures.
     weak var window: NSWindow?
 
@@ -81,11 +82,17 @@ final class ScreenController {
     func newScreen() {
         let index = model.activeScreenID.flatMap { id in project.screens.firstIndex { $0.id == id } }
         let add = AddScreen(
-            name: ScreenNames.newScreenName(in: project), viewport: .defaultForNewScreens,
+            name: ScreenNames.newScreenName(in: project), viewport: newScreenViewport,
             at: index.map { $0 + 1 })
         if apply(add) {
             model.show(add.screen.id)
         }
+    }
+
+    /// The viewport a new screen gets: the default viewport from settings, with This Device measured now.
+    var newScreenViewport: Viewport {
+        settingsStore.settings.newScreenViewport(
+            displaySize: displaySize().map { (Double($0.width), Double($0.height)) })
     }
 
     /// Duplicates a screen after itself (after its variant group, when it has one) and shows the copy.
@@ -211,7 +218,7 @@ final class ScreenController {
 
     /// The presets the viewport menus offer: the built-in ones, then the user's.
     var presets: (builtIn: [ViewportPreset], user: [ViewportPreset]) {
-        (ViewportPresets.builtIn, presetStore.presets)
+        (ViewportPresets.builtIn, settingsStore.settings.viewportPresets)
     }
 
     /// Asks for a name and saves the screen's viewport size as a user preset in `settings.json`, then gives the
@@ -221,7 +228,7 @@ final class ScreenController {
         askName("Save Viewport as Preset", "") { [weak self] name in
             guard let self, let name = name.flatMap(ScreenNames.cleaned) else { return }
             do {
-                let preset = try self.presetStore.save(
+                let preset = try self.settingsStore.save(
                     name: name, width: screen.viewport.width, height: screen.viewport.height)
                 self.setViewport(preset.viewport, of: id)
             } catch {
@@ -235,7 +242,7 @@ final class ScreenController {
     /// Copies a screen into its variant group at `viewport`, named after the viewport, and shows the copy.
     func newVariant(of id: ScreenID, viewport: Viewport) {
         guard let screen = project.screen(withID: id) else { return }
-        let label = ViewportPresets.shortName(for: viewport, userPresets: presetStore.presets)
+        let label = ViewportPresets.shortName(for: viewport, userPresets: settingsStore.settings.viewportPresets)
         let variant = NewVariant(of: id, viewport: viewport, name: "\(screen.name) (\(label))")
         if apply(variant) {
             model.show(variant.newID)

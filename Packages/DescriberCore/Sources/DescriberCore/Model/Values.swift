@@ -42,7 +42,7 @@ public struct Viewport: Hashable, Sendable {
         self.height = height
     }
 
-    /// The viewport new screens get until settings provide one (milestone 10).
+    /// The viewport new screens get when settings don't name another (`AppSettings.defaultViewport`).
     public static let defaultForNewScreens = Viewport(preset: "iphone-15", width: 393, height: 852)
 }
 
