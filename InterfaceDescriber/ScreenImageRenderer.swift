@@ -35,8 +35,13 @@ enum ScreenImageRenderer {
         let root = layers(
             for: screen, extent: extent, offsets: offsets,
             visibleDescriptions: project.editorState.visibleDescriptions, scale: CGFloat(scale))
+        // A layer's own `isGeometryFlipped` is relative to its superlayer, so the flipped root needs one above it.
+        let frame = CALayer()
+        frame.anchorPoint = .zero
+        frame.frame = root.frame
+        frame.addSublayer(root)
         context.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
-        root.render(in: context)
+        frame.render(in: context)
         CATransaction.commit()
         return context.makeImage()
     }
@@ -45,8 +50,8 @@ enum ScreenImageRenderer {
         project.editorState.screens[screen.id]?.scrollOffsets ?? [:]
     }
 
-    /// The layer tree to render: a root the size of the extent with its geometry flipped, so its sublayers have their
-    /// origin at the top left as on the canvas, holding the screen's layers moved so the extent's corner is at zero.
+    /// The layer tree to render: a root the size of the extent with its geometry flipped, so it and its sublayers have
+    /// their origin at the top left as on the canvas, holding the screen's layers moved so the extent's corner is at zero.
     private static func layers(
         for screen: Screen, extent: Frame, offsets: [RegionID: ScrollOffset], visibleDescriptions: Set<RegionID>,
         scale: CGFloat
