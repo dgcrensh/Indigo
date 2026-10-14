@@ -50,6 +50,9 @@ public final class RegionEditor {
     public private(set) var fields: RegionFields
     /// For a new region, the command that removes it again.
     private let removeNewRegion: Command?
+    /// For an existing region, its screen's layout when the session started, which changing the scrolling can
+    /// change.
+    private let originalLayout: RegionLayout?
     private var isFinished = false
 
     /// Opens an existing region.
@@ -62,6 +65,7 @@ public final class RegionEditor {
         self.original = RegionFields(found.region)
         self.fields = original
         self.removeNewRegion = nil
+        self.originalLayout = RegionLayout(screen: found.screen)
     }
 
     /// Draws a new region with `command`, without recording it, and opens it.
@@ -75,6 +79,7 @@ public final class RegionEditor {
         self.original = RegionFields(created)
         self.fields = original
         self.removeNewRegion = inverse
+        self.originalLayout = nil
     }
 
     /// Whether the region is still in the project. An undo that runs while the panel is open can remove it.
@@ -100,8 +105,9 @@ public final class RegionEditor {
         try set(\.links, links, RegionCommands.setLinks(links, of: region))
     }
 
-    public func setScroll(_ scroll: Scroll?) throws {
-        try set(\.scroll, scroll, RegionCommands.setScroll(scroll, of: region))
+    /// Children the new content area no longer holds are re-placed at the screen's scroll positions, `scrollOffsets`.
+    public func setScroll(_ scroll: Scroll?, scrollOffsets: [RegionID: ScrollOffset] = [:]) throws {
+        try set(\.scroll, scroll, RegionCommands.setScroll(scroll, of: region, scrollOffsets: scrollOffsets))
     }
 
     private func set<Value: Equatable>(
@@ -176,7 +182,15 @@ public final class RegionEditor {
             commands.append(RegionCommands.setLinks(original.links, of: region))
         }
         if fields.scroll != original.scroll {
-            commands.append(RegionCommands.setScroll(original.scroll, of: region))
+            // Setting the scrolling back wouldn't put back children it re-placed, so the layout goes back too.
+            let actionName = "Change Scrolling"
+            var restores: [Command] = [
+                SetRegionValue(actionName: actionName, region: region, keyPath: \.scroll, value: original.scroll)
+            ]
+            if let originalLayout {
+                restores.append(RestoreLayout(actionName: actionName, screen: screen, layout: originalLayout))
+            }
+            commands.append(CompositeCommand(actionName: actionName, commands: restores))
         }
         return commands
     }

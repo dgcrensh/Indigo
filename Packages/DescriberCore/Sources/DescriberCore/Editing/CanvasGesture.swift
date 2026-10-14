@@ -16,6 +16,9 @@ public struct GestureContext {
     /// The canvas zoom, so distances meant in view points (the drag threshold, handle size) can be measured in
     /// screen points.
     public var zoom: Double
+    /// The scroll positions of the screen's scrolling regions, from its editor state. The gesture works where
+    /// regions are drawn (`ScrollLayout`).
+    public var scrollOffsets: [RegionID: ScrollOffset]
 
     public init(
         screen: Screen,
@@ -23,7 +26,8 @@ public struct GestureContext {
         selection: [RegionID] = [],
         snappingEnabled: Bool = true,
         gridSize: Int = Snapping.defaultGridSize,
-        zoom: Double = 1
+        zoom: Double = 1,
+        scrollOffsets: [RegionID: ScrollOffset] = [:]
     ) {
         self.screen = screen
         self.tool = tool
@@ -31,12 +35,14 @@ public struct GestureContext {
         self.snappingEnabled = snappingEnabled
         self.gridSize = gridSize
         self.zoom = zoom
+        self.scrollOffsets = scrollOffsets
     }
 }
 
 /// One press, drag and release on the canvas, as spec Section 5 describes for each tool. The canvas feeds it pointer
 /// positions in screen points and shows its `selection` and `preview`; on release it returns at most one command, so
-/// a drag is one undo step. The screen isn't changed until that command is performed.
+/// a drag is one undo step. The screen isn't changed until that command is performed. Frames are where regions are
+/// drawn at the screen's scroll positions, so a click hits what shows and nothing clipped away.
 public struct CanvasGesture {
     /// How far, in view points, the pointer moves before a press counts as a drag.
     public static let dragThreshold = 3.0
@@ -46,6 +52,7 @@ public struct CanvasGesture {
     public enum Preview: Equatable {
         case none
         /// Regions drawn at frames other than their own: moved regions with their descendants, or a resized region.
+        /// Frames are drawn frames.
         case frames([RegionID: Frame])
         /// The region the Region tool is drawing.
         case newRegion(Frame)
@@ -74,6 +81,8 @@ public struct CanvasGesture {
     }
 
     public let context: GestureContext
+    /// Where the screen's regions are drawn.
+    public let layout: ScrollLayout
     public let start: CGPoint
     public private(set) var selection: [RegionID]
     public private(set) var preview: Preview = .none
@@ -100,6 +109,8 @@ public struct CanvasGesture {
         pressAt point: CGPoint, modifiers: KeyCombo.Modifiers = [], clickCount: Int = 1, context: GestureContext
     ) {
         self.context = context
+        let layout = ScrollLayout(screen: context.screen, offsets: context.scrollOffsets)
+        self.layout = layout
         self.clickCount = clickCount
         self.start = point
         self.current = point
@@ -112,18 +123,18 @@ public struct CanvasGesture {
         case .write:
             kind = .writeClick
         case .select:
-            let index = RegionIndex(screen: context.screen)
-            if modifiers.contains(.command), let hit = HitTesting.region(at: point, in: context.screen),
+            let index = layout.index
+            if modifiers.contains(.command), let hit = layout.region(at: point),
                 index.region(hit)?.links.isEmpty == false
             {
                 selection = [hit]
                 kind = .followLink(hit)
-            } else if selection.count == 1, let selected = index.region(selection[0]),
+            } else if selection.count == 1, let selected = layout.drawnFrame(of: selection[0]),
                 let handle = ResizeHandle.handle(
-                    at: point, on: selected.frame.cgRect, radius: Self.handleRadius / context.zoom)
+                    at: point, on: selected.cgRect, radius: Self.handleRadius / context.zoom)
             {
-                kind = .resize(region: selected.id, handle: handle, original: selected.frame)
-            } else if let hit = HitTesting.region(at: point, in: context.screen) {
+                kind = .resize(region: selection[0], handle: handle, original: selected)
+            } else if let hit = layout.region(at: point) {
                 if shift {
                     selection = Selection.toggling(hit, in: selection)
                 } else if selection.contains(hit) {
@@ -132,7 +143,7 @@ public struct CanvasGesture {
                     selection = [hit]
                 }
                 if selection.contains(hit) {
-                    kind = Self.move(grabbing: hit, selection: selection, index: index)
+                    kind = Self.move(grabbing: hit, selection: selection, layout: layout)
                 }
             } else {
                 if !shift {
@@ -143,7 +154,8 @@ public struct CanvasGesture {
         }
     }
 
-    private static func move(grabbing hit: RegionID, selection: [RegionID], index: RegionIndex) -> Kind {
+    private static func move(grabbing hit: RegionID, selection: [RegionID], layout: ScrollLayout) -> Kind {
+        let index = layout.index
         guard var roots = try? topmostRegions(selection, in: index).map(\.id) else { return .none }
         // The grabbed region, or the selected region it is inside, leads, so its origin snaps.
         if let grabbed = index.path(to: hit).first(where: { roots.contains($0.id) })?.id {
@@ -153,7 +165,7 @@ public struct CanvasGesture {
         var originals: [RegionID: Frame] = [:]
         for root in roots {
             for region in index.region(root)?.subtree ?? [] {
-                originals[region.id] = region.frame
+                originals[region.id] = layout.drawnFrame(of: region.id) ?? region.frame
             }
         }
         return .move(roots: roots, originals: originals)
@@ -188,7 +200,7 @@ public struct CanvasGesture {
             preview = Self.drawnFrame(from: start, to: point, grid: grid).map(Preview.newRegion) ?? .none
         case .marquee(let base):
             let rect = CGRect(x: start.x, y: start.y, width: dx, height: dy).standardized
-            selection = Selection.adding(HitTesting.regions(touching: rect, in: context.screen), to: base)
+            selection = Selection.adding(layout.regions(touching: rect), to: base)
             preview = .marquee(rect)
         }
     }
@@ -213,13 +225,13 @@ public struct CanvasGesture {
             }
             switch kind {
             case .writeClick:
-                let hit = HitTesting.region(at: start, in: context.screen)
+                let hit = layout.region(at: start)
                 selection = hit.map { [$0] } ?? []
                 detailsRequest = hit.map(DetailsRequest.open) ?? .close
             case .followLink(let region):
                 linkRequest = region
             case .move where clickCount >= 2:
-                if let hit = HitTesting.region(at: start, in: context.screen) {
+                if let hit = layout.region(at: start) {
                     selection = [hit]
                     detailsRequest = .open(hit)
                 }
@@ -236,18 +248,22 @@ public struct CanvasGesture {
             let frame = Self.resizedFrame(
                 original, handle: handle, dx: point.x - start.x, dy: point.y - start.y, grid: grid)
             guard frame != original else { return nil }
-            return ResizeRegion(screen: screen, region: region, frame: frame, edges: handle.edges)
+            return ResizeRegion(
+                screen: screen, region: region, frame: frame, edges: handle.edges,
+                scrollOffsets: context.scrollOffsets)
         case .move(let roots, let originals):
             let dx = Int((point.x - start.x).rounded())
             let dy = Int((point.y - start.y).rounded())
             let delta = moveDelta(
                 roots: roots, originals: originals, dx: point.x - start.x, dy: point.y - start.y, grid: grid)
             guard delta != (0, 0) else { return nil }
-            return MoveRegions(screen: screen, regions: roots, dx: dx, dy: dy, grid: grid)
+            return MoveRegions(
+                screen: screen, regions: roots, dx: dx, dy: dy, grid: grid, scrollOffsets: context.scrollOffsets)
         case .draw:
             guard let frame = Self.drawnFrame(from: start, to: point, grid: grid) else { return nil }
             selection = [newRegionID]
-            return CreateRegion(screen: screen, frame: frame, id: newRegionID)
+            return CreateRegion(
+                screen: screen, frame: frame, id: newRegionID, scrollOffsets: context.scrollOffsets)
         }
     }
 

@@ -1,6 +1,7 @@
 import Foundation
 
-/// Draws a new region. Unless a parent is given, the parenting rule picks its parent.
+/// Draws a new region. Unless a parent is given, the parenting rule picks its parent at the screen's scroll
+/// positions, and `frame` is where it is drawn (see `ScrollLayout`).
 public struct CreateRegion: Command {
     public let actionName = "New Region"
     public let screen: ScreenID
@@ -10,8 +11,11 @@ public struct CreateRegion: Command {
     public let kind: RegionKind
     /// Grid size to snap every edge to, or nil when snapping is off for this gesture.
     public let grid: Int?
-    /// Places the region as the last child of this region instead of applying the parenting rule.
+    /// Places the region as the last child of this region instead of applying the parenting rule. `frame` is then
+    /// its frame in the file.
     public let parent: RegionID?
+    /// The scroll positions of the screen's scrolling regions, from its editor state.
+    public let scrollOffsets: [RegionID: ScrollOffset]
 
     public init(
         screen: ScreenID,
@@ -20,7 +24,8 @@ public struct CreateRegion: Command {
         kind: RegionKind = .open,
         id: RegionID = .make(),
         grid: Int? = nil,
-        parent: RegionID? = nil
+        parent: RegionID? = nil,
+        scrollOffsets: [RegionID: ScrollOffset] = [:]
     ) {
         self.screen = screen
         self.frame = frame
@@ -29,6 +34,7 @@ public struct CreateRegion: Command {
         self.id = id
         self.grid = grid
         self.parent = parent
+        self.scrollOffsets = scrollOffsets
     }
 
     public func apply(to project: Project) throws -> Command {
@@ -40,32 +46,38 @@ public struct CreateRegion: Command {
         if let parent, !index.contains(parent) { throw EditError.regionNotFound(parent) }
 
         let before = RegionLayout(screen: screen)
-        let region = Region(id: id, title: title, kind: kind, frame: frame)
-        Parenting.attach(region, toParent: parent, in: screen)
-        if parent == nil {
-            Parenting.place(id, in: screen)
-        }
+        let placement =
+            parent.map { Parenting.Placement(parent: $0, frame: frame) }
+            ?? Parenting.placement(forDrawn: frame, excluding: nil, in: screen, offsets: scrollOffsets)
+        let region = Region(id: id, title: title, kind: kind, frame: placement.frame)
+        Parenting.attach(region, toParent: placement.parent, in: screen)
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
     }
 }
 
-/// Moves one or more regions by the same delta. Descendants move with them, and each moved region is re-parented
-/// by the parenting rule.
+/// Moves one or more regions by the same delta where they are drawn. Descendants move with them, and each moved
+/// region is re-parented by the parenting rule at the screen's scroll positions, so it lands where it was dropped.
 public struct MoveRegions: Command {
     public let screen: ScreenID
     public let regions: [RegionID]
     public let dx: Int
     public let dy: Int
-    /// Grid size to snap to, or nil when snapping is off for this gesture. The first moved region's origin lands
-    /// on the grid and the others keep their offsets from it.
+    /// Grid size to snap to, or nil when snapping is off for this gesture. The first moved region's drawn origin
+    /// lands on the grid and the others keep their offsets from it.
     public let grid: Int?
+    /// The scroll positions of the screen's scrolling regions, from its editor state.
+    public let scrollOffsets: [RegionID: ScrollOffset]
 
-    public init(screen: ScreenID, regions: [RegionID], dx: Int, dy: Int, grid: Int? = nil) {
+    public init(
+        screen: ScreenID, regions: [RegionID], dx: Int, dy: Int, grid: Int? = nil,
+        scrollOffsets: [RegionID: ScrollOffset] = [:]
+    ) {
         self.screen = screen
         self.regions = regions
         self.dx = dx
         self.dy = dy
         self.grid = grid
+        self.scrollOffsets = scrollOffsets
     }
 
     public var actionName: String { regions.count == 1 ? "Move Region" : "Move Regions" }
@@ -76,7 +88,11 @@ public struct MoveRegions: Command {
         let roots = try topmostRegions(regions, in: index)
         guard let first = roots.first else { throw EditError.nothingToDo }
 
-        let delta = Self.snappedDelta(moving: first.frame, dx: dx, dy: dy, grid: grid)
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        let delta = Self.snappedDelta(
+            moving: layout.drawnFrame(of: first.id) ?? first.frame, dx: dx, dy: dy, grid: grid)
+        // A region nobody can see keeps its scrolling parent, so nudging a hidden region doesn't move it out.
+        let hidden = Set(roots.filter { layout.visibleFrame(of: $0.id) == nil }.map(\.id))
 
         let before = RegionLayout(screen: screen)
         for root in roots {
@@ -85,7 +101,8 @@ public struct MoveRegions: Command {
             }
         }
         for root in roots {
-            Parenting.reparentAfterChange(of: root.id, in: screen)
+            Parenting.reparentAfterChange(
+                of: root.id, in: screen, offsets: scrollOffsets, keepingParent: hidden.contains(root.id))
         }
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
     }
@@ -99,7 +116,8 @@ public struct MoveRegions: Command {
     }
 }
 
-/// Resizes one region to a new frame. Children keep their frames; any that no longer fit are re-parented.
+/// Resizes one region to a new frame, where it is drawn. Children keep their frames; any that no longer fit are
+/// re-parented.
 public struct ResizeRegion: Command {
     public let actionName = "Resize Region"
     public let screen: ScreenID
@@ -109,24 +127,32 @@ public struct ResizeRegion: Command {
     public let edges: Snapping.Edges
     /// Grid size to snap to, or nil when snapping is off for this gesture.
     public let grid: Int?
+    /// The scroll positions of the screen's scrolling regions, from its editor state.
+    public let scrollOffsets: [RegionID: ScrollOffset]
 
-    public init(screen: ScreenID, region: RegionID, frame: Frame, edges: Snapping.Edges = .all, grid: Int? = nil) {
+    public init(
+        screen: ScreenID, region: RegionID, frame: Frame, edges: Snapping.Edges = .all, grid: Int? = nil,
+        scrollOffsets: [RegionID: ScrollOffset] = [:]
+    ) {
         self.screen = screen
         self.region = region
         self.frame = frame
         self.edges = edges
         self.grid = grid
+        self.scrollOffsets = scrollOffsets
     }
 
     public func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
-        guard let target = RegionIndex(screen: screen).region(region) else { throw EditError.regionNotFound(region) }
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        guard let target = layout.index.region(region) else { throw EditError.regionNotFound(region) }
         let frame = grid.map { Snapping.snap(frame: self.frame, grid: $0, mode: .resize(edges)) } ?? self.frame
         guard Geometry.meetsMinimumSize(frame) else { throw EditError.belowMinimumSize(frame) }
 
         let before = RegionLayout(screen: screen)
-        target.frame = frame
-        Parenting.reparentAfterChange(of: region, in: screen)
+        let shift = layout.contentShift(of: layout.index[region]?.parent)
+        target.frame = frame.offsetBy(dx: shift.x, dy: shift.y)
+        Parenting.reparentAfterChange(of: region, in: screen, offsets: scrollOffsets)
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
     }
 }
@@ -252,13 +278,20 @@ public struct PasteRegions: Command {
     public let pasted: [Region]
     /// Places the copies under this region instead of applying the parenting rule.
     public let parent: RegionID?
+    /// The scroll positions of the screen's scrolling regions. Without `parent`, the copies' frames are where they
+    /// are drawn.
+    public let scrollOffsets: [RegionID: ScrollOffset]
 
     /// `regions` are copied; the originals are never inserted, so they may come from any screen or the clipboard.
-    public init(screen: ScreenID, regions: [Region], parent: RegionID? = nil, actionName: String = "Paste") {
+    public init(
+        screen: ScreenID, regions: [Region], parent: RegionID? = nil, actionName: String = "Paste",
+        scrollOffsets: [RegionID: ScrollOffset] = [:]
+    ) {
         self.actionName = actionName
         self.screen = screen
         self.pasted = regions.map { $0.copyWithNewIDs() }
         self.parent = parent
+        self.scrollOffsets = scrollOffsets
     }
 
     public func apply(to project: Project) throws -> Command {
@@ -274,14 +307,15 @@ public struct PasteRegions: Command {
         for region in pasted {
             Parenting.attach(region, toParent: parent, in: screen)
             if parent == nil {
-                Parenting.place(region.id, in: screen)
+                Parenting.place(region.id, in: screen, offsets: scrollOffsets)
             }
         }
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
     }
 }
 
-/// Commands that set one field of a region. Each returns its own inverse, and none moves the region in the tree.
+/// Commands that set one field of a region. Each returns its own inverse, and none moves the region itself in the
+/// tree.
 public enum RegionCommands {
     public static func setTitle(_ title: String, of region: RegionID) -> Command {
         SetRegionValue(actionName: "Edit Title", region: region, keyPath: \.title, value: title)
@@ -299,8 +333,40 @@ public enum RegionCommands {
         SetRegionValue(actionName: "Edit Links", region: region, keyPath: \.links, value: links)
     }
 
-    public static func setScroll(_ scroll: Scroll?, of region: RegionID) -> Command {
-        SetRegionValue(actionName: "Change Scrolling", region: region, keyPath: \.scroll, value: scroll)
+    /// Children that no longer fit the new content area are re-placed by the parenting rule (see `SetRegionScroll`).
+    public static func setScroll(
+        _ scroll: Scroll?, of region: RegionID, scrollOffsets: [RegionID: ScrollOffset] = [:]
+    ) -> Command {
+        SetRegionScroll(region: region, scroll: scroll, scrollOffsets: scrollOffsets)
+    }
+}
+
+/// Sets a region's scrolling. Turning it off or shrinking the content can leave children outside the content area;
+/// each of those is re-placed by the parenting rule at the screen's scroll positions. Undoes to the same layout.
+public struct SetRegionScroll: Command {
+    public let actionName = "Change Scrolling"
+    public let region: RegionID
+    public let scroll: Scroll?
+    public let scrollOffsets: [RegionID: ScrollOffset]
+
+    public init(region: RegionID, scroll: Scroll?, scrollOffsets: [RegionID: ScrollOffset] = [:]) {
+        self.region = region
+        self.scroll = scroll
+        self.scrollOffsets = scrollOffsets
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        guard let (target, screen) = project.region(withID: region) else { throw EditError.regionNotFound(region) }
+        let before = RegionLayout(screen: screen)
+        let old = target.scroll
+        target.scroll = scroll
+        Parenting.replaceChildrenOutsideContent(of: target, in: screen, offsets: scrollOffsets)
+        return CompositeCommand(
+            actionName: actionName,
+            commands: [
+                RestoreLayout(actionName: actionName, screen: screen.id, layout: before),
+                SetRegionValue(actionName: actionName, region: region, keyPath: \.scroll, value: old),
+            ])
     }
 }
 
