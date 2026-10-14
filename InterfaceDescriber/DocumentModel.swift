@@ -70,6 +70,12 @@ final class DocumentModel {
         activeScreenID = project.initialScreen
         history = NavigationHistory()
         screenOrder = SidebarOutline(project: project).screens
+        // Every card draws the new project now, so the next check only picks up edits made after this.
+        thumbnailFingerprints = [:]
+        recordThumbnailFingerprints()
+        for revision in thumbnailRevisions.values {
+            revision.value += 1
+        }
         noteChange()
         if hadDetails {
             detailsDidChange?()
