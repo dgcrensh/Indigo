@@ -111,6 +111,61 @@ final class DocumentWindowController: NSWindowController {
         canvasController.toggleGridSizePopover()
     }
 
+    // MARK: Selection and editing
+    // Copy, Paste and Select All use the standard selectors, so a text view being edited takes them first. Delete has
+    // its own, since a text view would take the bare Delete key as a menu command.
+
+    @objc func copy(_ sender: Any?) {
+        canvasController.copySelection()
+    }
+
+    @objc func paste(_ sender: Any?) {
+        canvasController.paste()
+    }
+
+    @objc func selectAll(_ sender: Any?) {
+        canvasController.selectAll()
+    }
+
+    @objc func duplicateSelection(_ sender: Any?) {
+        canvasController.duplicate()
+    }
+
+    @objc func deleteSelection(_ sender: Any?) {
+        canvasController.deleteSelection()
+    }
+
+    @objc func selectParent(_ sender: Any?) {
+        canvasController.selectParent()
+    }
+
+    @objc func selectChildren(_ sender: Any?) {
+        canvasController.selectChildren()
+    }
+
+    @objc func bringToFront(_ sender: Any?) {
+        canvasController.reorderSelection(to: .front)
+    }
+
+    @objc func sendToBack(_ sender: Any?) {
+        canvasController.reorderSelection(to: .back)
+    }
+
+    /// The Nudge menu's items carry their `KeyAction` as the represented object.
+    @objc func nudge(_ sender: Any?) {
+        guard let name = (sender as? NSMenuItem)?.representedObject as? String, let action = KeyAction(rawValue: name)
+        else { return }
+        canvasController.nudge(action)
+    }
+
+    @objc func toggleDescription(_ sender: Any?) {
+        canvasController.toggleDescriptions(all: false)
+    }
+
+    @objc func toggleAllDescriptions(_ sender: Any?) {
+        canvasController.toggleDescriptions(all: true)
+    }
+
     // MARK: Details panel
 
     var isShowingDetails: Bool {
@@ -196,6 +251,13 @@ final class DocumentWindowController: NSWindowController {
     var isEditingText: Bool {
         window?.firstResponder is NSText
     }
+
+    /// Whether keys go to the canvas: it has focus, or nothing in the window does. Canvas keys without Cmd only work
+    /// then, so they never take keys from the panel's fields and pop-ups or the sidebar.
+    var canvasHasFocus: Bool {
+        guard let window else { return false }
+        return window.firstResponder === canvasController.canvasView || window.firstResponder === window
+    }
 }
 
 extension DocumentWindowController: NSWindowDelegate {
@@ -223,6 +285,17 @@ extension DocumentWindowController: NSMenuItemValidation {
             menuItem.state = model.snappingEnabled ? .on : .off
         case #selector(showGridSize(_:)):
             break
+        case #selector(copy(_:)), #selector(duplicateSelection(_:)), #selector(bringToFront(_:)),
+            #selector(sendToBack(_:)):
+            return !isEditingText && canvasController.hasSelection
+        case #selector(paste(_:)):
+            return !isEditingText && canvasController.canPaste
+        case #selector(selectAll(_:)), #selector(toggleAllDescriptions(_:)):
+            let hasRegions = model.activeScreen.map { !$0.regions.isEmpty } ?? false
+            return hasRegions && (menuItem.action == #selector(selectAll(_:)) || canvasHasFocus)
+        case #selector(deleteSelection(_:)), #selector(selectParent(_:)), #selector(selectChildren(_:)),
+            #selector(nudge(_:)), #selector(toggleDescription(_:)):
+            return canvasHasFocus && canvasController.hasSelection
         default:
             return true
         }

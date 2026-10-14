@@ -34,6 +34,14 @@ final class CanvasViewController: NSViewController {
     /// The camera, and whether it was fitted, from before the details panel opened, to go back to when it closes.
     private var cameraBeforeDetails: (camera: Camera, isFitted: Bool)?
     private var cameraAnimation: Timer?
+    /// Where Copy writes regions and Paste reads them. Tests use a private pasteboard.
+    var pasteboard = NSPasteboard.general
+    /// Asks whether to delete regions that have regions inside them, and calls back with the answer. Shows a sheet
+    /// on the window; tests replace it.
+    lazy var confirmDelete: (_ message: String, _ completion: @escaping (Bool) -> Void) -> Void = {
+        [weak self] message, completion in
+        self?.showDeleteAlert(message, completion: completion)
+    }
 
     init(model: DocumentModel) {
         self.model = model
@@ -115,6 +123,7 @@ final class CanvasViewController: NSViewController {
             canvasView.reload()
         }
         canvasView.tool = model.tool
+        canvasView.visibleDescriptions = model.project.editorState.visibleDescriptions
         if gesture == nil {
             canvasView.selection = model.selection
         }
@@ -343,14 +352,181 @@ final class CanvasViewController: NSViewController {
         case .writeTool: choose(.write)
         case .toggleSnapping: toggleSnapping()
         case .gridSize: toggleGridSizePopover()
+        case .selectAll: selectAll()
+        case .selectParent: selectParent()
+        case .selectChildren: selectChildren()
+        case .delete: deleteSelection()
+        case .copy: copySelection()
+        case .paste: paste()
+        case .duplicate: duplicate()
+        case .bringToFront: reorderSelection(to: .front)
+        case .sendToBack: reorderSelection(to: .back)
+        case .toggleDescription: toggleDescriptions(all: false)
+        case .toggleAllDescriptions: toggleDescriptions(all: true)
+        case .nudgeLeft, .nudgeRight, .nudgeUp, .nudgeDown, .nudgeLeftFar, .nudgeRightFar, .nudgeUpFar, .nudgeDownFar:
+            nudge(action)
         default: return false
         }
         return true
     }
 
+    // MARK: Selection and editing (spec Section 7)
+
+    /// The selection as it stands on the shown screen, leaving out regions that are gone.
+    private var currentSelection: [RegionID] {
+        guard let screen = model.activeScreen else { return [] }
+        return DescriberCore.Selection.pruned(model.selection, to: screen)
+    }
+
+    /// Whether there is a selection to copy, delete, nudge or reorder.
+    var hasSelection: Bool {
+        !currentSelection.isEmpty
+    }
+
+    func selectAll() {
+        guard let screen = model.activeScreen else { return }
+        setSelection(DescriberCore.Selection.all(on: screen))
+    }
+
+    /// Replaces the selection with the selected regions' parents. Nothing changes when none has one.
+    func selectParent() {
+        guard let screen = model.activeScreen else { return }
+        let parents = DescriberCore.Selection.parents(of: currentSelection, on: screen)
+        guard !parents.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        setSelection(parents)
+    }
+
+    /// Replaces the selection with the selected regions' direct children. Nothing changes when they have none.
+    func selectChildren() {
+        guard let screen = model.activeScreen else { return }
+        let children = DescriberCore.Selection.children(of: currentSelection, on: screen)
+        guard !children.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        setSelection(children)
+    }
+
+    /// Deletes the selection and everything inside it as one step, asking first when it has regions inside.
+    func deleteSelection() {
+        // A region open in the details panel is committed first; a new one with a blank title disappears then.
+        model.closeDetails()
+        guard let screen = model.activeScreen else { return }
+        let selection = currentSelection
+        guard !selection.isEmpty else { return }
+        let delete = DeleteRegions(screen: screen.id, regions: selection)
+        guard let message = DeleteConfirmation.message(deleting: selection, on: screen) else {
+            apply(delete)
+            return
+        }
+        confirmDelete(message) { [weak self] confirmed in
+            guard confirmed, let self, self.model.activeScreenID == screen.id else { return }
+            self.apply(delete)
+        }
+    }
+
+    private func showDeleteAlert(_ message: String, completion: @escaping (Bool) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = "Undo brings them back."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        if let window = view.window, window.isVisible {
+            alert.beginSheetModal(for: window) { response in
+                completion(response == .alertFirstButtonReturn)
+            }
+        } else {
+            completion(alert.runModal() == .alertFirstButtonReturn)
+        }
+    }
+
+    /// The pasteboard type for copied regions, as the core's clipboard JSON.
+    static let regionsPasteboardType = NSPasteboard.PasteboardType(AppIdentity.documentTypeIdentifier + ".regions")
+
+    /// Puts the selected regions on the pasteboard, with their titles as plain text.
+    func copySelection() {
+        guard let screen = model.activeScreen,
+            let clipboard = RegionClipboard(copying: currentSelection, on: screen)
+        else { return }
+        pasteboard.clearContents()
+        pasteboard.setData(clipboard.data(in: model.project), forType: Self.regionsPasteboardType)
+        pasteboard.setString(clipboard.text, forType: .string)
+    }
+
+    /// The regions on the pasteboard, if it holds any.
+    private var pastedClipboard: RegionClipboard? {
+        pasteboard.data(forType: Self.regionsPasteboardType).flatMap { try? RegionClipboard(data: $0) }
+    }
+
+    var canPaste: Bool {
+        model.activeScreen != nil && pasteboard.availableType(from: [Self.regionsPasteboardType]) != nil
+    }
+
+    /// Pastes the regions on the pasteboard onto the shown screen as one step, and selects the copies.
+    func paste() {
+        guard let clipboard = pastedClipboard else { return }
+        paste(clipboard, actionName: "Paste")
+    }
+
+    /// Copies the selection beside itself as one step, and selects the copies. Leaves the pasteboard alone.
+    func duplicate() {
+        guard let screen = model.activeScreen,
+            let clipboard = RegionClipboard(copying: currentSelection, on: screen)
+        else { return }
+        paste(clipboard, actionName: "Duplicate")
+    }
+
+    private func paste(_ clipboard: RegionClipboard, actionName: String) {
+        model.closeDetails()
+        guard let screen = model.activeScreen else { return }
+        let command = clipboard.paste(
+            onto: screen, in: model.project, grid: gridSize(for: screen), actionName: actionName)
+        if apply(command) {
+            setSelection(command.pasted.map(\.id))
+        }
+    }
+
+    /// Moves the selection by one grid step, or four with Shift; by 1 pt and 4 pt with snapping off.
+    func nudge(_ action: KeyAction) {
+        model.closeDetails()
+        guard let screen = model.activeScreen,
+            let delta = Nudge.delta(for: action, grid: gridSize(for: screen), snapping: model.snappingEnabled)
+        else { return }
+        let selection = currentSelection
+        guard !selection.isEmpty else { return }
+        apply(MoveRegions(screen: screen.id, regions: selection, dx: delta.dx, dy: delta.dy))
+    }
+
+    /// Brings the selection to the front or sends it to the back of its siblings.
+    func reorderSelection(to position: ReorderRegion.Position) {
+        model.closeDetails()
+        guard let screen = model.activeScreen else { return }
+        let selection = currentSelection
+        guard !selection.isEmpty else { return }
+        apply(ReorderRegions(screen: screen.id, regions: selection, to: position))
+    }
+
+    /// Shows or hides descriptions on the canvas: the selection's with `D`, every region's on the screen with
+    /// `Shift-D`. Editor state like zoom, so it isn't undoable; the next save writes it.
+    func toggleDescriptions(all: Bool) {
+        guard let screen = model.activeScreen else { return }
+        let regions = all ? DescriberCore.Selection.all(on: screen) : currentSelection
+        guard !regions.isEmpty else { return }
+        let state = model.project.editorState
+        model.project.editorState.visibleDescriptions = DescriptionVisibility.toggling(
+            regions, in: state.visibleDescriptions)
+        canvasView.visibleDescriptions = model.project.editorState.visibleDescriptions
+    }
+
     // MARK: Gestures
 
-    private func apply(_ command: Command) {
+    /// Performs `command` as one step, and returns whether it was applied. A command with nothing to do, such as
+    /// bringing the frontmost region to the front, changes nothing quietly; any other failure beeps.
+    @discardableResult
+    private func apply(_ command: Command) -> Bool {
         do {
             if let performCommand {
                 try performCommand(command)
@@ -359,8 +535,12 @@ final class CanvasViewController: NSViewController {
                 try model.session.perform(command)
                 model.noteChange()
             }
+            return true
+        } catch EditError.nothingToDo {
+            return false
         } catch {
             NSSound.beep()
+            return false
         }
     }
 

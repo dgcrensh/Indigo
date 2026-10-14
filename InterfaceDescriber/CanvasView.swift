@@ -64,6 +64,21 @@ final class CanvasView: NSView {
             withoutAnimation(applySelection)
         }
     }
+    /// The regions whose descriptions show on the canvas, from the editor state (spec Section 4).
+    var visibleDescriptions: Set<RegionID> = [] {
+        didSet {
+            guard visibleDescriptions != oldValue else { return }
+            withoutAnimation {
+                for (id, layers) in regionLayers {
+                    let shows = visibleDescriptions.contains(id)
+                    if layers.showsDescription != shows {
+                        layers.showsDescription = shows
+                        layers.layout(zoom: camera.zoom)
+                    }
+                }
+            }
+        }
+    }
     /// What the gesture in progress would do.
     var preview: CanvasGesture.Preview = .none {
         didSet {
@@ -226,6 +241,7 @@ final class CanvasView: NSView {
                 layers.update(from: region, bounds: bounds, titleWidths: titleWidths)
                 layers.apply(colors, scale: scale)
                 layers.isSelected = selected.contains(region.id)
+                layers.showsDescription = visibleDescriptions.contains(region.id)
                 kept[region.id] = layers
                 regions[region.id] = region
                 boxes.append(layers.box)
@@ -279,6 +295,11 @@ final class CanvasView: NSView {
     /// The regions whose layers show as selected, for tests.
     var selectedLayerIDs: Set<RegionID> {
         Set(regionLayers.filter { $0.value.isSelected }.keys)
+    }
+
+    /// The regions whose layers are drawing a description, for tests.
+    var describedLayerIDs: Set<RegionID> {
+        Set(regionLayers.filter { $0.value.isShowingDescription }.keys)
     }
 
     /// Whether the resize handles are showing, for tests.

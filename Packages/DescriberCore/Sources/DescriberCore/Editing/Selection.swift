@@ -20,4 +20,23 @@ public enum Selection {
         let index = RegionIndex(screen: screen)
         return selection.filter { index.contains($0) }
     }
+
+    /// Every region on `screen`, in draw order: what Select All selects (spec Section 7).
+    public static func all(on screen: Screen) -> [RegionID] {
+        screen.allRegions.map(\.id)
+    }
+
+    /// The parents of the selected regions, without repeats, in selection order: what Select Parent selects. A
+    /// top-level region has no parent and adds nothing, so a selection of only top-level regions gives none.
+    public static func parents(of selection: [RegionID], on screen: Screen) -> [RegionID] {
+        let index = RegionIndex(screen: screen)
+        return adding(selection.compactMap { index[$0]?.parent }, to: [])
+    }
+
+    /// The direct children of the selected regions, without repeats, in selection then sibling order: what Select
+    /// Children selects.
+    public static func children(of selection: [RegionID], on screen: Screen) -> [RegionID] {
+        let index = RegionIndex(screen: screen)
+        return adding(selection.flatMap { index.region($0)?.children.map(\.id) ?? [] }, to: [])
+    }
 }

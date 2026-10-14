@@ -118,7 +118,49 @@ enum MainMenu {
         menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         addItem(to: menu, "Copy", action: #selector(NSText.copy(_:)), keybind: .copy)
         addItem(to: menu, "Paste", action: #selector(NSText.paste(_:)), keybind: .paste)
+        addItem(
+            to: menu, "Duplicate", action: #selector(DocumentWindowController.duplicateSelection(_:)),
+            keybind: .duplicate)
+        addItem(to: menu, "Delete", action: #selector(DocumentWindowController.deleteSelection(_:)), keybind: .delete)
+        // Forward Delete deletes too.
+        let forwardDelete = addItem(
+            to: menu, "Delete", action: #selector(DocumentWindowController.deleteSelection(_:)), keybind: .delete,
+            index: 1)
+        forwardDelete.isHidden = true
+        forwardDelete.allowsKeyEquivalentWhenHidden = true
         addItem(to: menu, "Select All", action: #selector(NSText.selectAll(_:)), keybind: .selectAll)
+        menu.addItem(.separator())
+        addItem(
+            to: menu, "Select Parent", action: #selector(DocumentWindowController.selectParent(_:)),
+            keybind: .selectParent)
+        addItem(
+            to: menu, "Select Children", action: #selector(DocumentWindowController.selectChildren(_:)),
+            keybind: .selectChildren)
+        menu.addItem(.separator())
+        addItem(
+            to: menu, "Bring to Front", action: #selector(DocumentWindowController.bringToFront(_:)),
+            keybind: .bringToFront)
+        addItem(
+            to: menu, "Send to Back", action: #selector(DocumentWindowController.sendToBack(_:)),
+            keybind: .sendToBack)
+        menu.addItem(submenuItem(nudgeMenu()))
+        return menu
+    }
+
+    /// The arrow-key nudges (spec Section 7). Each item carries its action, so one method handles them all.
+    private static func nudgeMenu() -> NSMenu {
+        let menu = NSMenu(title: "Nudge")
+        let items: [(String, KeyAction)] = [
+            ("Nudge Left", .nudgeLeft), ("Nudge Right", .nudgeRight), ("Nudge Up", .nudgeUp),
+            ("Nudge Down", .nudgeDown), ("Nudge Left Four Steps", .nudgeLeftFar),
+            ("Nudge Right Four Steps", .nudgeRightFar), ("Nudge Up Four Steps", .nudgeUpFar),
+            ("Nudge Down Four Steps", .nudgeDownFar),
+        ]
+        for (index, (title, action)) in items.enumerated() {
+            if index == 4 { menu.addItem(.separator()) }
+            let item = addItem(to: menu, title, action: #selector(DocumentWindowController.nudge(_:)), keybind: action)
+            item.representedObject = action.rawValue
+        }
         return menu
     }
 
@@ -133,6 +175,13 @@ enum MainMenu {
         addItem(to: menu, "Zoom Out", action: #selector(DocumentWindowController.zoomOut(_:)), keybind: .zoomOut)
         addItem(
             to: menu, "Actual Size", action: #selector(DocumentWindowController.actualSize(_:)), keybind: .actualSize)
+        menu.addItem(.separator())
+        addItem(
+            to: menu, "Toggle Description", action: #selector(DocumentWindowController.toggleDescription(_:)),
+            keybind: .toggleDescription)
+        addItem(
+            to: menu, "Toggle All Descriptions",
+            action: #selector(DocumentWindowController.toggleAllDescriptions(_:)), keybind: .toggleAllDescriptions)
         menu.addItem(.separator())
         addItem(
             to: menu, "Toggle Sidebar", action: #selector(NSSplitViewController.toggleSidebar(_:)),
