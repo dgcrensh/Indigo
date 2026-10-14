@@ -27,7 +27,7 @@ extension PaperPalette {
 
 extension NSColor {
     /// A color of the palette that follows the appearance it is drawn in, for views and text.
-    static func paper(_ color: @escaping @Sendable (PaperPalette) -> PaperColor) -> NSColor {
+    static func paper(_ color: @escaping (PaperPalette) -> PaperColor) -> NSColor {
         NSColor(name: nil) { appearance in
             color(PaperPalette.palette(for: appearance)).nsColor
         }
@@ -58,10 +58,10 @@ enum PaperShadow {
 /// A rounded surface of the Paper look, such as a card or a well, in a palette color that follows the appearance,
 /// optionally with the soft shadow and a border.
 class PaperSurfaceView: NSView {
-    var color: @Sendable (PaperPalette) -> PaperColor {
+    var color: (PaperPalette) -> PaperColor {
         didSet { needsDisplay = true }
     }
-    var borderColor: (@Sendable (PaperPalette) -> PaperColor)? {
+    var borderColor: ((PaperPalette) -> PaperColor)? {
         didSet { needsDisplay = true }
     }
     var borderWidth: CGFloat = 1 {
@@ -79,7 +79,7 @@ class PaperSurfaceView: NSView {
     }
 
     init(
-        color: @escaping @Sendable (PaperPalette) -> PaperColor, cornerRadius: CGFloat = 0, hasShadow: Bool = false
+        color: @escaping (PaperPalette) -> PaperColor, cornerRadius: CGFloat = 0, hasShadow: Bool = false
     ) {
         self.color = color
         self.cornerRadius = cornerRadius
