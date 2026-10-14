@@ -127,6 +127,21 @@ enum MainMenu {
             action: #selector(NSDocument.revertToSaved(_:)),
             keyEquivalent: ""
         )
+        menu.addItem(.separator())
+        menu.addItem(submenuItem(exportMenu()))
+        return menu
+    }
+
+    /// The exports in spec Section 11.
+    private static func exportMenu() -> NSMenu {
+        let menu = NSMenu(title: "Export")
+        menu.addItem(
+            withTitle: "Markdown…", action: #selector(DocumentWindowController.exportMarkdown(_:)), keyEquivalent: "")
+        menu.addItem(
+            withTitle: "Single-File JSON…", action: #selector(DocumentWindowController.exportJSON(_:)),
+            keyEquivalent: "")
+        menu.addItem(
+            withTitle: "PNG Images…", action: #selector(DocumentWindowController.exportPNGs(_:)), keyEquivalent: "")
         return menu
     }
 

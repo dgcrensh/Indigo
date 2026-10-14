@@ -24,7 +24,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 8 | Screens, viewports, variants, links | [m8-screens-links.md](plans/m8-screens-links.md) | 3 (link following needs 5) | shipped |
 | 9 | Scrolling | [m9-scrolling.md](plans/m9-scrolling.md) | 5, 6 | shipped |
 | 10 | Settings file and live reload | [m10-settings.md](plans/m10-settings.md) | 3 | shipped |
-| 11 | Exports: Markdown, single-file JSON, PNG | not written | 1 (PNG needs 4) | |
+| 11 | Exports: Markdown, single-file JSON, PNG | [m11-exports.md](plans/m11-exports.md) | 1 (PNG needs 4) | shipped |
 | 12 | Hardening and acceptance pass | not written | all | |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:

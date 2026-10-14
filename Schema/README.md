@@ -3,7 +3,8 @@
 A `.uidesc` project is a folder (macOS shows it as one document) of pretty-printed JSON. This page is the short
 version, for agents and people reading or writing packages by hand. The full rules are in
 [spec Section 3](../docs/app-spec.md#3-data-model), and [uidesc-1.schema.json](uidesc-1.schema.json) is a JSON
-Schema (2020-12) that both `project.json` and each screen file validate against.
+Schema (2020-12) that both `project.json` and each screen file validate against, as does the single-file JSON
+export.
 
 ```
 Acme.uidesc/
@@ -59,6 +60,23 @@ REGENERATE_EXAMPLE=1 swift test --package-path Packages/DescriberCore --filter t
 ```
 
 `scripts/check.sh` fails if the example doesn't re-save byte for byte or doesn't match the schema.
+
+## Exports
+
+File > Export in the app writes the project for readers that can't open a package. Exports are never read back;
+the package stays the source of truth. The same regeneration command writes the example's exports.
+
+- **Markdown** ([examples/acme.md](examples/acme.md)): one file with a section per screen in sidebar order (kind,
+  viewport, scrolling, the other screens of its variant group) and its regions as a nested list, back to front,
+  with kind, position, size, description, scrolling and links. Links are anchors to the target screen's section,
+  using GitHub's heading IDs (lowercase, punctuation dropped, spaces as `-`, repeated headings numbered `-1`, `-2`).
+- **Single-file JSON** ([examples/acme.json](examples/acme.json)): `schemaVersion, name, units, screens,
+  variantGroups`, where each `screens` entry is the whole screen exactly as its screen file writes it. No `file`
+  keys and no editor state. It matches the schema's `export` shape.
+- **PNG**: one image per screen at 1× or 2×, named by the screen file's slug (`login.png`, `login@2x.png`). It shows
+  what the canvas shows, without selection or grid, in the light appearance: the bounds, regions with titles, link
+  and scroll indicators, parts outside the bounds tinted, descriptions where `D` shows them, and scrolling content at
+  its saved scroll position.
 
 ## App settings
 

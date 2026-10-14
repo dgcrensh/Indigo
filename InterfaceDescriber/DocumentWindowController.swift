@@ -12,6 +12,7 @@ final class DocumentWindowController: NSWindowController {
     let canvasController: CanvasViewController
     let detailsController: DetailsPanelController
     let screenController: ScreenController
+    let exportController: ExportController
     /// Where the window's settings come from: the shared store, or one a test gives. The window follows its changes.
     var settingsStore: SettingsStore {
         didSet { observeSettings(previous: oldValue) }
@@ -25,6 +26,7 @@ final class DocumentWindowController: NSWindowController {
         canvasController = CanvasViewController(model: model)
         detailsController = DetailsPanelController(model: model)
         screenController = ScreenController(model: model)
+        exportController = ExportController(model: model)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -64,6 +66,7 @@ final class DocumentWindowController: NSWindowController {
             model?.closeDetails()
         }
         screenController.window = window
+        exportController.window = window
         screenController.anchorView = canvasController.canvasView
         canvasController.followLinks = { [weak self] region, anchor in
             self?.screenController.followLinks(of: region, at: anchor)
@@ -76,6 +79,10 @@ final class DocumentWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used")
+    }
+
+    override var document: AnyObject? {
+        didSet { exportController.document = document as? NSDocument }
     }
 
     var sidebarItem: NSSplitViewItem {
@@ -116,6 +123,20 @@ final class DocumentWindowController: NSWindowController {
             model.settings = settingsStore.settings
         }
         canvasController.settingsBanner.show(message: settingsStore.error?.localizedDescription)
+    }
+
+    // MARK: Export
+
+    @objc func exportMarkdown(_ sender: Any?) {
+        exportController.exportMarkdown()
+    }
+
+    @objc func exportJSON(_ sender: Any?) {
+        exportController.exportJSON()
+    }
+
+    @objc func exportPNGs(_ sender: Any?) {
+        exportController.exportPNGs()
     }
 
     // MARK: Zoom
