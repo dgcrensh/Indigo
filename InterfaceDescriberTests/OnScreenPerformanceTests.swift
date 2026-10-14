@@ -28,7 +28,6 @@ final class OnScreenPerformanceTests: XCTestCase {
         controller.window?.displayIfNeeded()
         CATransaction.flush()
         let open = (CACurrentMediaTime() - start) * 1000
-        document.undoManager?.groupsByEvent = false
         return (document, controller, open)
     }
 
