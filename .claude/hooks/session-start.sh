@@ -1,6 +1,7 @@
 #!/bin/bash
 # Installs a Linux Swift toolchain in Claude Code cloud sessions so the core package tests and the format check
-# (`scripts/check.sh --core`) can run there. The app target needs macOS and Xcode; CI covers it.
+# (`scripts/check.sh --core`) can run there, and perf so `scripts/bench.sh --profile` can sample the core. The app
+# target needs macOS and Xcode; CI covers it.
 #
 # The version matches CI's Xcode 16.2 (Swift 6.0.3), which also ships `swift format`.
 # The toolchain comes from download.swift.org when that host is reachable, otherwise from the official `swift`
@@ -21,8 +22,19 @@ persist_path() {
     fi
 }
 
+export DEBIAN_FRONTEND=noninteractive
+
+# perf for `scripts/bench.sh --profile`. Ubuntu packages it per kernel; any version samples user-space code.
+install_perf() {
+    if ! ls /usr/lib/linux-tools-*/perf > /dev/null 2>&1; then
+        apt-get -qq update
+        apt-get -qq install -y --no-install-recommends linux-tools-generic > /dev/null
+    fi
+}
+
 if [ -x "$SWIFT_BIN/swift" ] && "$SWIFT_BIN/swift" --version > /dev/null 2>&1; then
     persist_path
+    install_perf
     exit 0
 fi
 
@@ -36,11 +48,11 @@ case "$(dpkg --print-architecture)" in
 esac
 
 # curl and jq for the download below, then runtime and build dependencies: the same list the official swift:6.0.3-noble image installs.
-export DEBIAN_FRONTEND=noninteractive
+# Then perf.
 apt-get -qq update
 apt-get -qq install -y --no-install-recommends \
     curl jq binutils git unzip gnupg2 libc6-dev libcurl4-openssl-dev libedit2 libgcc-13-dev libpython3-dev \
-    libsqlite3-0 libstdc++-13-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev > /dev/null
+    libsqlite3-0 libstdc++-13-dev libxml2-dev libncurses-dev libz3-dev pkg-config tzdata zlib1g-dev linux-tools-generic > /dev/null
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

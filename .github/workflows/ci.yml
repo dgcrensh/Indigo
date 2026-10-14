@@ -5,6 +5,8 @@ on:
     branches: [main]
   # Every pull request, so stacked PRs whose base is another PR's branch are checked too.
   pull_request:
+  # Any branch on demand, so a cloud session can check app code on macOS before opening a PR.
+  workflow_dispatch:
 
 jobs:
   check:
