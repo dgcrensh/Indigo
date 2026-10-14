@@ -13,6 +13,9 @@ struct CanvasRenderer {
     /// Laid-out titles, kept by the canvas between draws.
     var titles: TitleCache
 
+    /// Temporary spike diagnostics: parts to leave out ("bounds", "grid", "fills", "borders", "titles").
+    static var skipped: Set<String> = []
+
     static let titleInset = CGSize(width: 4, height: 2)
 
     /// Draws everything that falls in `dirtyRect`, in view points, and returns how many regions it drew.
@@ -24,10 +27,12 @@ struct CanvasRenderer {
 
         let bounds = screen.canvasBounds
         let boundsRect = camera.viewRect(fromScreen: bounds.cgRect)
-        context.setFillColor(NSColor.textBackgroundColor.cgColor)
-        context.fill(boundsRect)
+        if !Self.skipped.contains("bounds") {
+            context.setFillColor(NSColor.textBackgroundColor.cgColor)
+            context.fill(boundsRect)
+        }
 
-        if let gridSize {
+        if let gridSize, !Self.skipped.contains("grid") {
             drawGrid(gridSize, in: dirtyRect, context: context)
         }
 
@@ -82,16 +87,21 @@ struct CanvasRenderer {
             guard frame.intersects(visible) else { continue }
             drawn += 1
             let rect = camera.viewRect(fromScreen: frame)
-            context.setFillColor(fill)
-            context.fill(rect)
+            if !Self.skipped.contains("fills") {
+                context.setFillColor(fill)
+                context.fill(rect)
+            }
             if !bounds.contains(region.frame) {
                 context.setFillColor(outside)
                 for part in region.frame.parts(outside: bounds) {
                     context.fill(camera.viewRect(fromScreen: part.cgRect))
                 }
             }
-            context.setStrokeColor(border)
-            context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
+            if !Self.skipped.contains("borders") {
+                context.setStrokeColor(border)
+                context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
+            }
+            if Self.skipped.contains("titles") { continue }
 
             let titleWidth = rect.width - 2 * inset.width
             guard titleWidth >= 8, rect.height >= titles.lineHeight + 2 * inset.height,

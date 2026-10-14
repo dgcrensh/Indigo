@@ -31,6 +31,18 @@ final class CanvasPerformanceTests: XCTestCase {
             )
             XCTAssertLessThan(average, 50, name)
         }
+        // Temporary spike breakdown at 100 %.
+        let hundred = (0..<10).map { Camera(zoom: 1, panX: Double($0), panY: 0) }
+        for skip in [
+            ["titles"], ["fills"], ["borders"], ["grid"], ["bounds"], ["titles", "fills", "borders", "grid", "bounds"],
+        ] {
+            CanvasRenderer.skipped = Set(skip)
+            let (average, _) = try timeRender(screen, cameras: hundred)
+            print(String(format: "Breakdown at 100 %%, without %@: %.2f ms", skip.joined(separator: "+"), average))
+        }
+        CanvasRenderer.skipped = []
+        let (oneX, _) = try timeRender(screen, cameras: hundred, scale: 1)
+        print(String(format: "Breakdown at 100 %%, 1x bitmap: %.2f ms", oneX))
         let (_, drawn) = try timeRender(screen, cameras: [fitted])
         XCTAssertEqual(drawn, 500)
     }
@@ -39,8 +51,9 @@ final class CanvasPerformanceTests: XCTestCase {
     /// titles, as the canvas would have done in earlier frames. Returns the average time in milliseconds and how
     /// many regions the first draw drew.
     @MainActor
-    private func timeRender(_ screen: Screen, cameras: [Camera]) throws -> (milliseconds: Double, drawn: Int) {
-        let scale: CGFloat = 2
+    private func timeRender(_ screen: Screen, cameras: [Camera], scale: CGFloat = 2) throws -> (
+        milliseconds: Double, drawn: Int
+    ) {
         let context = try XCTUnwrap(
             CGContext(
                 data: nil,
