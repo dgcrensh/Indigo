@@ -143,4 +143,77 @@ final class CanvasLayoutTests: XCTestCase {
             XCTAssertLessThan(Double(step - 12) * zoom, 6)
         }
     }
+
+    // MARK: Coverage (milestone 20)
+
+    private let viewSize = CGSize(width: 1440, height: 900)
+
+    func testTheCoveredRectIsTheVisibleRectWithHalfAViewAround() {
+        let coverage = CanvasCoverage(camera: Camera(zoom: 2, panX: 100, panY: 50), viewSize: viewSize)
+        XCTAssertEqual(coverage.visible, CGRect(x: 100, y: 50, width: 720, height: 450))
+        XCTAssertEqual(coverage.covered, CGRect(x: -260, y: -175, width: 1440, height: 900))
+        XCTAssertTrue(coverage.covered.contains(coverage.visible))
+        XCTAssertFalse(coverage.needsRecompute(visible: coverage.visible))
+    }
+
+    func testAPanInsideTheMarginNeedsNoRecompute() {
+        let camera = Camera(zoom: 1)
+        let coverage = CanvasCoverage(camera: camera, viewSize: viewSize)
+        for (dx, dy) in [(700.0, 0.0), (-720, 0), (0, 450), (0, -440), (500, -300)] {
+            let panned = camera.panned(byViewDX: dx, dy: dy)
+            XCTAssertFalse(coverage.needsRecompute(for: panned, viewSize: viewSize), "\(dx), \(dy)")
+        }
+        for (dx, dy) in [(721.0, 0.0), (-730, 0), (0, 451), (0, -460), (800, 500)] {
+            let panned = camera.panned(byViewDX: dx, dy: dy)
+            XCTAssertTrue(coverage.needsRecompute(for: panned, viewSize: viewSize), "\(dx), \(dy)")
+        }
+    }
+
+    func testAZoomAlwaysNeedsARecompute() {
+        let camera = Camera(zoom: 1)
+        let coverage = CanvasCoverage(camera: camera, viewSize: viewSize)
+        let center = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        XCTAssertTrue(coverage.needsRecompute(for: camera.zoomed(to: 1.01, anchor: center), viewSize: viewSize))
+        XCTAssertTrue(coverage.needsRecompute(for: camera.zoomed(to: 0.99, anchor: center), viewSize: viewSize))
+        XCTAssertFalse(coverage.needsRecompute(for: camera, viewSize: viewSize))
+    }
+
+    func testRegionsIntersectingARectOverTheFirstContainer() throws {
+        let screen = try XCTUnwrap(Project.stressTest(regionCount: 500).screens.first)
+        let container = try XCTUnwrap(screen.regions.first)
+        let rect = container.frame.cgRect
+        let layout = ScrollLayout(screen: screen)
+        let positions = layout.regions(intersecting: rect)
+        XCTAssertEqual(positions, Array(0...20), "the container, its five rows and their fifteen items")
+        let subtree = [container] + container.children.flatMap { [$0] + $0.children }
+        XCTAssertEqual(positions.map { layout.index.regions[$0].id }, subtree.map(\.id))
+        XCTAssertEqual(layout.regions(intersecting: CGRect(x: 2000, y: 0, width: 100, height: 100)), [])
+        XCTAssertEqual(layout.regions(intersecting: CGRect(x: 20, y: 20, width: 0, height: 100)), [])
+    }
+
+    func testRegionsIntersectingLeaveOutChildrenScrolledOutOfView() throws {
+        let screen = try XCTUnwrap(Project.stressTest(regionCount: 500).screens.first)
+        let container = try XCTUnwrap(screen.regions.first)
+        container.scroll = Scroll(axis: .vertical, contentWidth: 340, contentHeight: 600)
+        let layout = ScrollLayout(screen: screen, offsets: [container.id: ScrollOffset(x: 0, y: 200)])
+        let ids = layout.regions(intersecting: container.frame.cgRect).map { layout.index.regions[$0].id }
+        // Rows 1 to 3 sit above the container's frame once it is scrolled 200 points; rows 4 and 5 still show.
+        let shown = [container] + container.children[3...].flatMap { [$0] + $0.children }
+        XCTAssertEqual(ids, shown.map(\.id))
+        let row1 = container.children[0]
+        XCTAssertNil(layout.visibleFrame(of: row1.id))
+        XCTAssertFalse(ids.contains(row1.id))
+    }
+
+    func testVisibleRegionsAreTheOnesARectAroundThemAllIntersects() throws {
+        let screen = try XCTUnwrap(Project.stressTest(regionCount: 500).screens.first)
+        let container = try XCTUnwrap(screen.regions.first)
+        container.scroll = Scroll(axis: .vertical, contentWidth: 340, contentHeight: 600)
+        let layout = ScrollLayout(screen: screen, offsets: [container.id: ScrollOffset(x: 0, y: 200)])
+        let visible = layout.visibleRegions()
+        XCTAssertEqual(visible.positions, layout.regions(intersecting: visible.extent.insetBy(dx: -1, dy: -1)))
+        XCTAssertEqual(visible.positions.count, 500 - 12, "rows 1 to 3 of the first container and their items")
+        XCTAssertEqual(visible.extent.minX, 16)
+        XCTAssertEqual(visible.extent.minY, 16)
+    }
 }

@@ -197,9 +197,16 @@ final class CanvasViewController: NSViewController {
         model.project.editorState.screens[screen.id]?.scrollOffsets ?? [:]
     }
 
-    /// Where `screen`'s regions are drawn at their scroll positions.
+    /// Where `screen`'s regions are drawn at their scroll positions: the canvas's own layout when it shows `screen` as
+    /// it is now, so a scroll event doesn't build one.
     private func scrollLayout(for screen: Screen) -> ScrollLayout {
-        ScrollLayout(screen: screen, offsets: scrollOffsets(for: screen))
+        let offsets = scrollOffsets(for: screen)
+        if canvasView.screen === screen, shownRevision == model.revision, canvasView.scrollOffsets == offsets,
+            let layout = canvasView.scrollLayout
+        {
+            return layout
+        }
+        return ScrollLayout(screen: screen, offsets: offsets)
     }
 
     /// The saved camera, or the viewport fitted into the canvas when there is none.
@@ -432,11 +439,23 @@ final class CanvasViewController: NSViewController {
 
     // MARK: Selection and editing (spec Section 7)
 
-    /// The selection as it stands on the shown screen, leaving out regions that are gone.
+    /// The selection as it stands on the shown screen, leaving out regions that are gone. Pruned once per change to
+    /// the selection or the project, not on every scroll event.
     private var currentSelection: [RegionID] {
         guard let screen = model.activeScreen else { return [] }
-        return DescriberCore.Selection.pruned(model.selection, to: screen)
+        if let prunedSelection, prunedSelection.screen === screen, prunedSelection.revision == model.revision,
+            prunedSelection.selection == model.selection
+        {
+            return prunedSelection.pruned
+        }
+        let pruned = DescriberCore.Selection.pruned(model.selection, to: screen)
+        prunedSelection = PrunedSelection(
+            screen: screen, revision: model.revision, selection: model.selection, pruned: pruned)
+        return pruned
     }
+
+    /// The last pruned selection, and what it was pruned for.
+    private var prunedSelection: PrunedSelection?
 
     /// Whether there is a selection to copy, delete, nudge or reorder.
     var hasSelection: Bool {
@@ -757,4 +776,12 @@ extension CanvasViewController: NSPopoverDelegate {
         gridPopover = nil
         updateGrid()
     }
+}
+
+/// A selection pruned to a screen, and the screen, project revision and selection it was pruned for.
+private struct PrunedSelection {
+    weak var screen: Screen?
+    var revision: Int
+    var selection: [RegionID]
+    var pruned: [RegionID]
 }

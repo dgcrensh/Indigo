@@ -111,3 +111,39 @@ public struct GridTiling: Equatable, Sendable {
         return min((line - pan) * zoom, 0)
     }
 }
+
+/// The part of a screen the canvas keeps laid out and in its layer tree: the visible rect plus a margin on every side,
+/// in screen points. Regions outside it are left out until the view comes near them, so the canvas does work in
+/// proportion to what is on screen. It is computed again only when the visible rect leaves it or the zoom changes,
+/// so most pans change nothing.
+public struct CanvasCoverage: Equatable, Sendable {
+    /// Half a view on every side: a pan of up to half a view changes nothing.
+    public static let defaultMargin = 0.5
+
+    /// The zoom it was computed for.
+    public let zoom: Double
+    /// The part of the screen the view showed when it was computed.
+    public let visible: CGRect
+    /// The visible rect grown by `margin` of its width and height on every side.
+    public let covered: CGRect
+
+    /// The coverage for `camera` showing a view of `viewSize`, with `margin` as a fraction of the view's size.
+    public init(camera: Camera, viewSize: CGSize, margin: Double = CanvasCoverage.defaultMargin) {
+        zoom = camera.zoom
+        let visible = camera.visibleRect(viewSize: viewSize)
+        self.visible = visible
+        covered = visible.insetBy(dx: -visible.width * margin, dy: -visible.height * margin)
+    }
+
+    /// Whether `visible` (in screen points) has moved past the covered rect, so the coverage must be computed again.
+    public func needsRecompute(visible: CGRect) -> Bool {
+        visible.minX < covered.minX || visible.minY < covered.minY || visible.maxX > covered.maxX
+            || visible.maxY > covered.maxY
+    }
+
+    /// Whether `camera` showing a view of `viewSize` needs a new coverage: always after a zoom, otherwise when the
+    /// view has moved past the covered rect.
+    public func needsRecompute(for camera: Camera, viewSize: CGSize) -> Bool {
+        camera.zoom != zoom || needsRecompute(visible: camera.visibleRect(viewSize: viewSize))
+    }
+}

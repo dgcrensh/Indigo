@@ -189,6 +189,32 @@ public struct ScrollLayout {
         }.map { index.regions[$0].id }
     }
 
+    /// The draw-order positions of the regions whose visible part (drawn frame cut to its clip) shares some area with
+    /// `rect`, in draw order. A region entirely clipped away intersects nothing.
+    public func regions(intersecting rect: CGRect) -> [Int] {
+        let rect = rect.standardized
+        guard rect.width > 0, rect.height > 0 else { return [] }
+        return index.regions.indices.filter { position in
+            guard let visible = visibleFrame(at: position)?.cgRect else { return false }
+            return visible.minX < rect.maxX && rect.minX < visible.maxX && visible.minY < rect.maxY
+                && rect.minY < visible.maxY
+        }
+    }
+
+    /// The draw-order positions of the regions with a visible part that has some area, and the smallest rectangle
+    /// holding all of those parts (`.null` when there are none). A rectangle that contains `extent` intersects exactly
+    /// these regions.
+    public func visibleRegions() -> (positions: [Int], extent: CGRect) {
+        var positions: [Int] = []
+        var extent = CGRect.null
+        for position in index.regions.indices {
+            guard let visible = visibleFrame(at: position), visible.w > 0, visible.h > 0 else { continue }
+            positions.append(position)
+            extent = extent.union(visible.cgRect)
+        }
+        return (positions, extent)
+    }
+
     /// The region two-finger scroll over `point` scrolls (spec Section 5): the topmost of `selection` that has
     /// content to scroll and whose visible part contains the point. Nil means the canvas pans.
     public func scrollTarget(at point: CGPoint, among selection: [RegionID]) -> RegionID? {
