@@ -5,7 +5,7 @@ on the package format from [m1-file-format.md](m1-file-format.md) and the docume
 [m3-document-shell.md](m3-document-shell.md). Independent of [m17-edit-scaling.md](m17-edit-scaling.md); either can
 ship first.
 
-**Status:** draft
+**Status:** reviewed
 
 ## Goal
 
@@ -111,4 +111,4 @@ DescriberCoreTests/`. Steps 1, 2 and 4 can be built in parallel; land 4 first so
 
 | Question | Default if unanswered | Answer |
 | --- | --- | --- |
-| Also skip building the value for screens the session didn't touch since the last write? | No: building and comparing is 0.7 ms per 500 regions and exact. Revisit with dirty tracking only if large projects still hitch. | |
+| Also skip building the value for screens the session didn't touch since the last write? | No: building and comparing is 0.7 ms per 500 regions and exact. Revisit with dirty tracking only if large projects still hitch. | Dallas agreed: the default. |

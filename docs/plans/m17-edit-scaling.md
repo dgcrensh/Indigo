@@ -5,7 +5,7 @@ Builds on the parenting rule and commands from [m2-commands.md](m2-commands.md),
 [m9-scrolling.md](m9-scrolling.md), and the core timings `scripts/bench.sh` added after
 [m16-chrome-responsiveness.md](m16-chrome-responsiveness.md).
 
-**Status:** draft
+**Status:** reviewed
 
 ## Goal
 
@@ -149,5 +149,5 @@ step can be timed against `main`.
 
 | Question | Default if unanswered | Answer |
 | --- | --- | --- |
-| Keep the reference copy of today's commands in the tests for good, or delete it once this ships? | Keep it: it is the cheapest guard on the parenting rule for later changes. | |
-| Rebuild the layout after a parent change, or update it in place? | Rebuild. In-place updates renumber everything drawn after the new parent, which costs about as much and is harder to get right; revisit if paste timings miss. | |
+| Keep the reference copy of today's commands in the tests for good, or delete it once this ships? | Keep it: it is the cheapest guard on the parenting rule for later changes. | Dallas agreed: the default. |
+| Rebuild the layout after a parent change, or update it in place? | Rebuild. In-place updates renumber everything drawn after the new parent, which costs about as much and is harder to get right; revisit if paste timings miss. | Dallas agreed: the default. |
