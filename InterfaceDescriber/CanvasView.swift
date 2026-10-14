@@ -147,6 +147,9 @@ final class CanvasView: NSView {
     /// selection and any previewed regions. The others' layers, if they have any, are brought up to date when they
     /// mount.
     private var mounted: Set<RegionID> = []
+    /// The draw-order positions of the mounted regions in `scrollLayout`, and their boxes as `regionsLayer` holds them.
+    private var mountedPositions: [Int] = []
+    private var mountedBoxes: [CALayer] = []
     /// `selection` as a set.
     private var selectedIDs: Set<RegionID> = []
     /// The drawn frames a gesture previews.
@@ -328,6 +331,8 @@ final class CanvasView: NSView {
                 regions = [:]
                 scrollLayout = nil
                 mounted = []
+                mountedPositions = []
+                mountedBoxes = []
                 regionsLayer.sublayers = nil
                 layoutGrid()
                 layoutOverlay()
@@ -376,19 +381,15 @@ final class CanvasView: NSView {
     /// only when the list changed.
     private func updateMounts(syncing: Bool = false) {
         guard let layout = scrollLayout, let coverage else { return }
-        var positions = Set(layout.regions(intersecting: coverage.covered))
-        for id in selection {
-            if let position = layout.index.position(of: id) { positions.insert(position) }
-        }
-        for id in previewFrames.keys {
-            if let position = layout.index.position(of: id) { positions.insert(position) }
-        }
+        let positions = mountPositions(layout, coverage)
+        // Most camera changes mount and unmount nothing.
+        if !syncing, positions == mountedPositions { return }
         let zoom = camera.zoom
         var mounting: Set<RegionID> = []
         mounting.reserveCapacity(positions.count)
         var boxes: [CALayer] = []
         boxes.reserveCapacity(positions.count)
-        for position in positions.sorted() {
+        for position in positions {
             let id = layout.index.regions[position].id
             let layers: RegionLayers
             if !syncing, mounted.contains(id), let existing = regionLayers[id] {
@@ -404,9 +405,52 @@ final class CanvasView: NSView {
             boxes.append(layers.box)
         }
         mounted = mounting
-        // Setting the sublayers removes and re-adds every box, so it is done only when the list changed.
-        if !(regionsLayer.sublayers ?? []).elementsEqual(boxes, by: ===) {
+        mountedPositions = positions
+        setMountedBoxes(boxes, keepsOrder: !syncing)
+    }
+
+    /// The draw-order positions to mount: the regions in the covered rect, the selection and the previewed regions.
+    private func mountPositions(_ layout: ScrollLayout, _ coverage: CanvasCoverage) -> [Int] {
+        let covered = layout.regions(intersecting: coverage.covered)
+        var extra: [Int] = []
+        for id in selection {
+            if let position = layout.index.position(of: id) { extra.append(position) }
+        }
+        for id in previewFrames.keys {
+            if let position = layout.index.position(of: id) { extra.append(position) }
+        }
+        guard !extra.isEmpty else { return covered }
+        return Array(Set(covered).union(extra)).sorted()
+    }
+
+    /// Puts `boxes` in `regionsLayer` in that order. With `keepsOrder`, the boxes that stay are known to keep their
+    /// order, so only the boxes that come and go are removed and inserted, unless that is most of them; otherwise the
+    /// sublayers are set, which removes and re-adds every box, only when the list changed.
+    private func setMountedBoxes(_ boxes: [CALayer], keepsOrder: Bool) {
+        defer { mountedBoxes = boxes }
+        guard keepsOrder else {
+            if !mountedBoxes.elementsEqual(boxes, by: ===) {
+                regionsLayer.sublayers = boxes
+            }
+            return
+        }
+        let incoming = Set(boxes.map(ObjectIdentifier.init))
+        let kept = mountedBoxes.filter { incoming.contains(ObjectIdentifier($0)) }
+        let changes = (mountedBoxes.count - kept.count) + (boxes.count - kept.count)
+        if changes > boxes.count / 2 {
             regionsLayer.sublayers = boxes
+            return
+        }
+        for box in mountedBoxes where !incoming.contains(ObjectIdentifier(box)) {
+            box.removeFromSuperlayer()
+        }
+        var next = 0
+        for (index, box) in boxes.enumerated() {
+            if next < kept.count, kept[next] === box {
+                next += 1
+            } else {
+                regionsLayer.insertSublayer(box, at: UInt32(index))
+            }
         }
     }
 

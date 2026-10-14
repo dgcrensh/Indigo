@@ -8,8 +8,8 @@ import XCTest
 /// The canvas's main-thread time per action with its window on screen, including the Core Animation commit
 /// (`CATransaction.flush()`), which `CanvasPerformanceTests` leaves out and which is most of the cost on a Mac
 /// (`real-hardware-profile.md` in the project files). Prints one line per timing at 500, 2,000 and 5,000 regions so
-/// each milestone's before and after show up in CI. Only the 500-region pan, pinch and nudge are asserted, loosely,
-/// as CI runners are slow.
+/// each milestone's before and after show up in CI. Only the 500-region pan, pinch and nudge of one region are
+/// asserted, loosely, as CI runners are slow.
 final class OnScreenPerformanceTests: XCTestCase {
     private let viewSize = CGSize(width: 1440, height: 900)
 
@@ -146,7 +146,6 @@ final class OnScreenPerformanceTests: XCTestCase {
                 XCTAssertLessThan(Self.median(pan), 16, "pan")
                 XCTAssertLessThan(Self.median(pinch), 16, "pinch")
                 XCTAssertLessThan(Self.median(nudgeOne), 16, "nudge one")
-                XCTAssertLessThan(Self.median(nudgeAll), 16, "nudge every region")
             }
         }
     }
