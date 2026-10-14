@@ -3,10 +3,11 @@ import DescriberCore
 import QuartzCore
 
 /// Renders a screen to an image for the PNG export (spec Section 11), with the canvas's own `RegionLayers` so the
-/// image shows what the canvas does: the bounds, the dashed viewport line of a scrolling screen, regions with their
-/// titles, link and scroll indicators, tints on parts outside the bounds, and the descriptions shown with `D`.
-/// Regions in scrolling content are drawn at their saved scroll positions and clipped. Editing aids (selection,
-/// handles, grid) are left out, and the colors are always the light appearance's, whatever the Mac uses.
+/// image shows what the canvas does: the desk, the bounds as a rounded sheet with its shadow, the dashed viewport
+/// line of a scrolling screen, regions with their titles, link and scroll indicators, tints on parts outside the
+/// bounds, and the descriptions shown with `D`. Regions in scrolling content are drawn at their saved scroll positions
+/// and clipped. Editing aids (selection, handles, grid) are left out, and the colors are always the light Paper
+/// palette's, whatever the Mac uses.
 @MainActor
 enum ScreenImageRenderer {
     /// The screen's PNG at `scale` (1 for 1×, 2 for 2×), sized in points so its resolution is 72 dpi times the
@@ -56,12 +57,12 @@ enum ScreenImageRenderer {
         for screen: Screen, extent: Frame, offsets: [RegionID: ScrollOffset], visibleDescriptions: Set<RegionID>,
         scale: CGFloat
     ) -> CALayer {
-        let colors = CanvasColors(appearance: NSAppearance(named: .aqua) ?? NSAppearance.currentDrawing())
+        let colors = CanvasColors(palette: .light)
         let root = CALayer()
         root.anchorPoint = .zero
         root.frame = CGRect(x: 0, y: 0, width: extent.w, height: extent.h)
         root.isGeometryFlipped = true
-        root.backgroundColor = colors.background
+        root.backgroundColor = colors.desk
 
         let content = CALayer()
         content.anchorPoint = .zero
@@ -72,15 +73,25 @@ enum ScreenImageRenderer {
         let boundsLayer = CALayer()
         boundsLayer.anchorPoint = .zero
         boundsLayer.frame = bounds.cgRect
-        boundsLayer.backgroundColor = colors.boundsFill
-        boundsLayer.borderColor = colors.boundsBorder
+        boundsLayer.backgroundColor = colors.sheet
+        boundsLayer.borderColor = colors.sheetBorder
         boundsLayer.borderWidth = 1
+        let radius = CGFloat(
+            min(PaperShapes.sheetCornerRadius(for: screen), Double(bounds.w) / 2, Double(bounds.h) / 2))
+        boundsLayer.cornerRadius = radius
+        boundsLayer.shadowColor = colors.sheetShadow
+        boundsLayer.shadowOpacity = 1
+        boundsLayer.shadowRadius = CGFloat(PaperShapes.shadowRadius)
+        // The root's geometry is flipped, so a positive offset is downwards.
+        boundsLayer.shadowOffset = CGSize(width: 0, height: PaperShapes.shadowOffset)
+        boundsLayer.shadowPath = CGPath(
+            roundedRect: boundsLayer.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         if screen.scroll != nil {
             let viewportOutline = CAShapeLayer()
             viewportOutline.anchorPoint = .zero
             viewportOutline.frame = boundsLayer.bounds
             viewportOutline.fillColor = nil
-            viewportOutline.strokeColor = colors.boundsBorder
+            viewportOutline.strokeColor = colors.viewportLine
             viewportOutline.lineWidth = 1
             viewportOutline.lineDashPattern = [4, 3]
             viewportOutline.path = CGPath(rect: screen.viewportFrame.cgRect, transform: nil)

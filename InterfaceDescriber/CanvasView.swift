@@ -101,16 +101,20 @@ final class CanvasView: NSView {
 
     /// Holds every canvas layer, in view coordinates with the origin at the top-left.
     let stage = CALayer()
-    /// The canvas bounds, with the dashed viewport outline for a scrolling screen.
+    /// The canvas bounds, drawn as a rounded sheet with a shadow, with the dashed viewport outline for a scrolling
+    /// screen.
     private let boundsLayer = CALayer()
     private let viewportOutline = CAShapeLayer()
-    private let gridLayer = CAShapeLayer()
+    /// The grid's dots: one dot, repeated along a row, and the row repeated down the view.
+    private let gridLayer = CAReplicatorLayer()
+    private let gridRow = CAReplicatorLayer()
+    private let gridDot = CALayer()
     /// The regions' boxes in z-order, in zoomed screen coordinates; its position is the screen origin in the view.
     let regionsLayer = CALayer()
     /// Above the regions, in the same coordinates: the region being drawn, the marquee, and the resize handles.
     private let overlayLayer = CALayer()
-    private let newRegionLayer = CALayer()
-    private let marqueeLayer = CALayer()
+    private let newRegionLayer = CAShapeLayer()
+    private let marqueeLayer = CAShapeLayer()
     private let handleLayers = ResizeHandle.allCases.map { _ in CALayer() }
     /// A dashed outline of each selected scrolling region's whole content area, at its scroll position.
     private let contentOutline = CAShapeLayer()
@@ -148,16 +152,24 @@ final class CanvasView: NSView {
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
-        layer?.backgroundColor = NSColor.underPageBackgroundColor.cgColor
+        layer?.backgroundColor = colors.desk
     }
 
     private func setUpLayers() {
-        for layer in [stage, boundsLayer, viewportOutline, gridLayer, regionsLayer, overlayLayer] {
+        for layer in [stage, boundsLayer, viewportOutline, gridLayer, gridRow, gridDot, regionsLayer, overlayLayer] {
             layer.anchorPoint = .zero
         }
-        for layer in [newRegionLayer, marqueeLayer] + handleLayers {
+        for layer in [newRegionLayer, marqueeLayer] {
             layer.anchorPoint = .zero
-            layer.borderWidth = 1
+            layer.lineWidth = 1
+            layer.lineDashPattern = [4, 3]
+            layer.isHidden = true
+            overlayLayer.addSublayer(layer)
+        }
+        for layer in handleLayers {
+            layer.anchorPoint = .zero
+            layer.borderWidth = 1.5
+            layer.cornerRadius = Self.handleSize / 2
             layer.isHidden = true
             overlayLayer.addSublayer(layer)
         }
@@ -170,9 +182,18 @@ final class CanvasView: NSView {
         contentOutline.lineDashPattern = [4, 3]
         overlayLayer.insertSublayer(contentOutline, at: 0)
         boundsLayer.borderWidth = 1
+        boundsLayer.shadowOpacity = 1
+        boundsLayer.shadowRadius = CGFloat(PaperShapes.shadowRadius)
+        // The stage's geometry is flipped, so a positive offset is downwards.
+        boundsLayer.shadowOffset = CGSize(width: 0, height: PaperShapes.shadowOffset)
         boundsLayer.addSublayer(viewportOutline)
-        gridLayer.fillColor = nil
+        gridDot.frame = CGRect(x: 0, y: 0, width: Self.gridDotSize, height: Self.gridDotSize)
+        gridDot.cornerRadius = Self.gridDotSize / 2
+        gridRow.addSublayer(gridDot)
+        gridLayer.addSublayer(gridRow)
+        gridLayer.isHidden = true
         emptyLabel.string = "No screen"
+        emptyLabel.font = PaperFont.rounded(ofSize: 13, weight: .medium)
         emptyLabel.fontSize = 13
         emptyLabel.alignmentMode = .center
         stage.addSublayer(boundsLayer)
@@ -207,6 +228,7 @@ final class CanvasView: NSView {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         colors = CanvasColors(appearance: effectiveAppearance)
+        needsDisplay = true
         withoutAnimation(applyColors)
     }
 
@@ -220,25 +242,31 @@ final class CanvasView: NSView {
     }
 
     private func applyColors() {
-        boundsLayer.backgroundColor = colors.boundsFill
-        boundsLayer.borderColor = colors.boundsBorder
-        viewportOutline.strokeColor = colors.boundsBorder
-        gridLayer.strokeColor = colors.grid
-        gridLayer.lineWidth = 1 / scale
+        layer?.backgroundColor = colors.desk
+        boundsLayer.backgroundColor = colors.sheet
+        boundsLayer.borderColor = colors.sheetBorder
+        boundsLayer.shadowColor = colors.sheetShadow
+        viewportOutline.strokeColor = colors.viewportLine
+        gridDot.backgroundColor = colors.gridDot
         emptyLabel.foregroundColor = colors.emptyText
         emptyLabel.contentsScale = scale
         for layers in regionLayers.values {
             layers.apply(colors, scale: scale)
         }
-        newRegionLayer.backgroundColor = colors.newRegionFill
-        newRegionLayer.borderColor = colors.selection
-        marqueeLayer.backgroundColor = colors.marqueeFill
-        marqueeLayer.borderColor = colors.selection
+        for layer in [newRegionLayer, marqueeLayer] {
+            layer.fillColor = colors.accentWash
+            layer.strokeColor = colors.accent
+        }
         for handle in handleLayers {
             handle.backgroundColor = colors.handleFill
-            handle.borderColor = colors.selection
+            handle.borderColor = colors.accent
         }
-        contentOutline.strokeColor = colors.selection
+        contentOutline.strokeColor = colors.scrollIndicator
+    }
+
+    /// The colors the canvas draws with now, for tests.
+    var canvasColors: CanvasColors {
+        colors
     }
 
     // MARK: Content
@@ -290,6 +318,21 @@ final class CanvasView: NSView {
             layoutContent()
             layoutGrid()
         }
+    }
+
+    /// The fill of `id`'s box, for tests. Nil for an unfilled region.
+    func fillColor(of id: RegionID) -> CGColor? {
+        regionLayers[id]?.fillColor
+    }
+
+    /// The corner radius of `id`'s box in view points, for tests.
+    func cornerRadius(of id: RegionID) -> CGFloat? {
+        regionLayers[id]?.cornerRadius
+    }
+
+    /// The sheet's corner radius in view points, for tests.
+    var sheetCornerRadius: CGFloat {
+        boundsLayer.cornerRadius
     }
 
     /// The number of regions with a layer.
@@ -345,6 +388,12 @@ final class CanvasView: NSView {
         guard let screen else { return }
         let zoom = camera.zoom
         boundsLayer.bounds = CGRect(origin: .zero, size: RegionLayers.zoomed(screen.canvasBounds, zoom).size)
+        let radius = min(
+            CGFloat(PaperShapes.sheetCornerRadius(for: screen) * zoom), boundsLayer.bounds.width / 2,
+            boundsLayer.bounds.height / 2)
+        boundsLayer.cornerRadius = radius
+        boundsLayer.shadowPath = CGPath(
+            roundedRect: boundsLayer.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         if screen.scroll != nil {
             viewportOutline.isHidden = false
             viewportOutline.path = CGPath(rect: RegionLayers.zoomed(screen.viewportFrame, zoom), transform: nil)
@@ -433,13 +482,12 @@ final class CanvasView: NSView {
         let zoom = camera.zoom
         switch preview {
         case .newRegion(let frame):
-            newRegionLayer.isHidden = false
-            newRegionLayer.frame = RegionLayers.zoomed(frame, zoom)
+            Self.outline(newRegionLayer, RegionLayers.zoomed(frame, zoom))
             marqueeLayer.isHidden = true
         case .marquee(let rect):
-            marqueeLayer.isHidden = false
-            marqueeLayer.frame = CGRect(
-                x: rect.minX * zoom, y: rect.minY * zoom, width: rect.width * zoom, height: rect.height * zoom)
+            Self.outline(
+                marqueeLayer,
+                CGRect(x: rect.minX * zoom, y: rect.minY * zoom, width: rect.width * zoom, height: rect.height * zoom))
             newRegionLayer.isHidden = true
         case .none, .frames:
             newRegionLayer.isHidden = true
@@ -447,6 +495,13 @@ final class CanvasView: NSView {
         }
         layoutHandles()
         layoutContentOutline()
+    }
+
+    /// Shows a dashed outline layer around `rect`.
+    private static func outline(_ layer: CAShapeLayer, _ rect: CGRect) {
+        layer.isHidden = false
+        layer.frame = rect
+        layer.path = CGPath(rect: CGRect(origin: .zero, size: rect.size).insetBy(dx: 0.5, dy: 0.5), transform: nil)
     }
 
     /// Outlines the content area of each selected scrolling region, except while a gesture moves or resizes regions.
@@ -473,8 +528,13 @@ final class CanvasView: NSView {
         return drawnRegions[id]?.frame ?? region.frame
     }
 
-    /// The handles' side, in view points, at every zoom.
-    static let handleSize: CGFloat = 7
+    /// The handles' diameter, in view points, at every zoom.
+    static let handleSize: CGFloat = 8
+
+    /// The handles' corner radius, for tests: half their size, as circles.
+    var handleCornerRadius: CGFloat {
+        handleLayers[0].cornerRadius
+    }
 
     private func layoutHandles() {
         guard let frame = handleFrame else {
@@ -492,26 +552,46 @@ final class CanvasView: NSView {
         }
     }
 
+    /// The grid dots' diameter and the least space between them, in view points.
+    static let gridDotSize: CGFloat = 2
+    static let gridDotMinimumSpacing = 10.0
+
+    /// Whether the grid's dots are showing, for tests.
+    var showsGridDots: Bool {
+        !gridLayer.isHidden && gridDotCount > 0
+    }
+
+    /// How many grid dots are drawn, for tests.
+    var gridDotCount: Int {
+        gridLayer.isHidden ? 0 : gridLayer.instanceCount * gridRow.instanceCount
+    }
+
+    /// Places a dot at every visible grid intersection, as one dot repeated along a row and the row repeated down, so
+    /// panning and zooming only move and count them.
     private func layoutGrid() {
         guard screen != nil, let gridSize else {
-            gridLayer.path = nil
+            gridLayer.isHidden = true
             return
         }
-        let step = GridLines.drawnStep(grid: gridSize, zoom: camera.zoom)
+        let step = GridLines.drawnStep(grid: gridSize, zoom: camera.zoom, minimumSpacing: Self.gridDotMinimumSpacing)
         let visible = camera.visibleRect(viewSize: bounds.size)
-        let path = CGMutablePath()
-        for x in GridLines.positions(from: visible.minX, to: visible.maxX, grid: step) {
-            let viewX = camera.viewPoint(fromScreen: CGPoint(x: x, y: 0)).x
-            path.move(to: CGPoint(x: viewX, y: 0))
-            path.addLine(to: CGPoint(x: viewX, y: bounds.height))
+        let columns = GridLines.positions(from: visible.minX, to: visible.maxX, grid: step)
+        let rows = GridLines.positions(from: visible.minY, to: visible.maxY, grid: step)
+        guard let firstColumn = columns.first, let firstRow = rows.first else {
+            gridLayer.isHidden = true
+            return
         }
-        for y in GridLines.positions(from: visible.minY, to: visible.maxY, grid: step) {
-            let viewY = camera.viewPoint(fromScreen: CGPoint(x: 0, y: y)).y
-            path.move(to: CGPoint(x: 0, y: viewY))
-            path.addLine(to: CGPoint(x: bounds.width, y: viewY))
-        }
+        let origin = camera.viewPoint(fromScreen: CGPoint(x: firstColumn, y: firstRow))
+        let spacing = Double(step) * camera.zoom
+        let size = Self.gridDotSize
+        gridLayer.isHidden = false
         gridLayer.frame = CGRect(origin: .zero, size: bounds.size)
-        gridLayer.path = path
+        gridRow.frame = CGRect(origin: .zero, size: bounds.size)
+        gridDot.frame = CGRect(x: origin.x - size / 2, y: origin.y - size / 2, width: size, height: size)
+        gridRow.instanceCount = columns.count
+        gridRow.instanceTransform = CATransform3DMakeTranslation(spacing, 0, 0)
+        gridLayer.instanceCount = rows.count
+        gridLayer.instanceTransform = CATransform3DMakeTranslation(0, spacing, 0)
     }
 
     private func withoutAnimation(_ changes: () -> Void) {

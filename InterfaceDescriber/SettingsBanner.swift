@@ -2,8 +2,8 @@ import AppKit
 
 /// The strip across the top of the canvas shown while `settings.json` can't be used (spec 12): the error, a note that
 /// the previous settings are still in use, an Open Settings button, and a close button that hides it until the error
-/// changes. It goes away when the file reads again.
-final class SettingsBanner: NSView {
+/// changes. It goes away when the file reads again. A Paper card that keeps an orange warning border.
+final class SettingsBanner: PaperSurfaceView {
     static let note = "Your previous settings are still in use."
 
     let messageLabel = NSTextField(wrappingLabelWithString: "")
@@ -14,13 +14,13 @@ final class SettingsBanner: NSView {
     /// The error the close button hid, which stays hidden until another one replaces it.
     private var dismissedMessage: String?
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
+    init() {
+        super.init(color: { $0.card }, cornerRadius: 12, hasShadow: true)
+        // The system orange of each appearance, matching the warning icon.
+        borderColor = { $0 == .dark ? PaperColor(hex: 0xFF9F0A) : PaperColor(hex: 0xFF9500) }
 
-        messageLabel.font = .systemFont(ofSize: 12)
+        messageLabel.font = PaperFont.rounded(ofSize: 12)
+        messageLabel.textColor = .paper { $0.ink }
         messageLabel.maximumNumberOfLines = 4
         messageLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         messageLabel.setAccessibilityIdentifier("settingsBannerMessage")
@@ -56,7 +56,6 @@ final class SettingsBanner: NSView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
         isHidden = true
-        updateColors()
     }
 
     @available(*, unavailable)
@@ -78,17 +77,5 @@ final class SettingsBanner: NSView {
     @objc func dismiss(_ sender: Any?) {
         dismissedMessage = message
         isHidden = true
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        updateColors()
-    }
-
-    private func updateColors() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
-            layer?.borderColor = NSColor.systemOrange.cgColor
-        }
     }
 }

@@ -21,9 +21,14 @@ final class CanvasViewController: NSViewController {
     /// go straight to the edit session.
     var performCommand: ((Command) throws -> Void)?
     let canvasView = CanvasView(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
-    let toastView = ToastView(frame: .zero)
+    let toastView = ToastView()
+    /// The floating tools at the bottom center of the canvas.
+    let toolPill = ToolPill()
+    /// How far the tool pill sits from the canvas's bottom edge, and the toast from the pill.
+    static let toolPillInset: CGFloat = 20
+    static let toastGap: CGFloat = 12
     /// Shown while `settings.json` can't be used. The window controller sets its message.
-    let settingsBanner = SettingsBanner(frame: .zero)
+    let settingsBanner = SettingsBanner()
     private var shownScreenID: ScreenID?
     private var shownProject: ObjectIdentifier?
     private var shownRevision: Int?
@@ -72,6 +77,18 @@ final class CanvasViewController: NSViewController {
             self.fit(screen)
         }
         container.addSubview(canvasView)
+        toolPill.translatesAutoresizingMaskIntoConstraints = false
+        toolPill.onChooseTool = { [weak self] tool in
+            self?.choose(tool)
+        }
+        toolPill.onSnap = { [weak self] optionHeld in
+            if optionHeld {
+                self?.toggleGridSizePopover()
+            } else {
+                self?.toggleSnapping()
+            }
+        }
+        container.addSubview(toolPill)
         toastView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(toastView)
         settingsBanner.translatesAutoresizingMaskIntoConstraints = false
@@ -80,8 +97,10 @@ final class CanvasViewController: NSViewController {
         let bannerWidth = settingsBanner.widthAnchor.constraint(equalToConstant: 640)
         bannerWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
+            toolPill.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            toolPill.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.toolPillInset),
             toastView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            toastView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -24),
+            toastView.bottomAnchor.constraint(equalTo: toolPill.topAnchor, constant: -Self.toastGap),
             settingsBanner.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor, constant: 12),
             settingsBanner.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             settingsBanner.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 12),
@@ -158,6 +177,14 @@ final class CanvasViewController: NSViewController {
     private func updateGrid() {
         let showsGrid = model.snappingEnabled || gridPopover != nil
         canvasView.gridSize = canvasView.screen.flatMap { showsGrid ? gridSize(for: $0) : nil }
+        updateToolPill()
+    }
+
+    /// Shows the tool, snapping and grid size in the pill, whatever changed them.
+    private func updateToolPill() {
+        toolPill.update(
+            tool: model.tool, snapping: model.snappingEnabled,
+            gridSize: canvasView.screen.map(gridSize(for:)) ?? model.settings.gridSize, keybinds: model.keybinds)
     }
 
     func gridSize(for screen: Screen) -> Int {
@@ -318,6 +345,7 @@ final class CanvasViewController: NSViewController {
     func choose(_ tool: Tool) {
         model.tool = tool
         canvasView.tool = tool
+        updateToolPill()
         show(.tool(tool))
     }
 
@@ -355,6 +383,7 @@ final class CanvasViewController: NSViewController {
         guard let screen = canvasView.screen else { return }
         let popover = NSPopover()
         popover.behavior = .transient
+        popover.hasFullSizeContent = true
         popover.delegate = self
         popover.contentViewController = NSHostingController(
             rootView: GridSizePicker(size: gridSize(for: screen)) { [weak self] size in
@@ -363,8 +392,9 @@ final class CanvasViewController: NSViewController {
         gridPopover = popover
         updateGrid()
         if canvasView.window?.isVisible == true {
-            let anchor = CGRect(x: canvasView.bounds.midX, y: 12, width: 1, height: 1)
-            popover.show(relativeTo: anchor, of: canvasView, preferredEdge: .maxY)
+            // Above the snap button: its top edge is min Y when it is flipped.
+            let button = toolPill.snapButton
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: button.isFlipped ? .minY : .maxY)
         }
     }
 

@@ -7,6 +7,9 @@ import DescriberCore
 ///
 /// AppKit rather than SwiftUI, because Return, Tab, Shift-Tab and Escape have to be redirected inside text views
 /// (spec 6.3), which `doCommandBy` delegate methods do reliably.
+///
+/// Drawn as a Paper card on the chrome background: the title and description sit on wells that show an accent ring
+/// while they have focus, kind is a row of chips, and link and scrolling rows sit on wells.
 final class DetailsPanelController: NSViewController {
     static let width: CGFloat = 300
 
@@ -17,7 +20,12 @@ final class DetailsPanelController: NSViewController {
     let titleField = NSTextField(string: "")
     let descriptionView: NSTextView
     private let descriptionScrollView: NSScrollView
-    let kindPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+    let kindChips = KindChips(frame: .zero)
+    /// The wells under the title and the description.
+    let titleWell = PaperSurfaceView(color: { $0.well }, cornerRadius: 8)
+    let descriptionWell = PaperSurfaceView(color: { $0.well }, cornerRadius: 8)
+    /// The card the form sits on.
+    let card = PaperSurfaceView(color: { $0.card }, cornerRadius: 16, hasShadow: true)
     private let linksStack = NSStackView()
     private(set) var linkRows: [LinkRow] = []
     let addLinkButton = NSButton(title: "Add Link", target: nil, action: nil)
@@ -26,6 +34,8 @@ final class DetailsPanelController: NSViewController {
     let contentWidthField = NSTextField(string: "")
     let contentHeightField = NSTextField(string: "")
     private let scrollOptions = NSStackView()
+    private let scrollingWell = WellStackView()
+    private var firstResponderObservation: NSKeyValueObservation?
     /// Set while the controls are filled from the model, so their change callbacks don't write back.
     private var isLoading = false
     /// Undo for typing in the panel's text fields, kept apart from the document's so Cmd-Z while typing undoes
@@ -76,22 +86,31 @@ final class DetailsPanelController: NSViewController {
         titleField.lineBreakMode = .byTruncatingTail
         titleField.cell?.isScrollable = true
         titleField.cell?.wraps = false
-        titleField.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+        titleField.font = PaperFont.rounded(ofSize: 16, weight: .bold)
+        titleField.textColor = .paper { $0.ink }
+        titleField.isBordered = false
+        titleField.isBezeled = false
+        titleField.drawsBackground = false
+        titleField.focusRingType = .none
         titleField.delegate = self
+        place(titleField, in: titleWell, insets: NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8))
 
         descriptionView.isRichText = false
         descriptionView.allowsUndo = true
-        descriptionView.font = .systemFont(ofSize: NSFont.systemFontSize)
-        descriptionView.textContainerInset = NSSize(width: 2, height: 4)
+        descriptionView.font = PaperFont.rounded(ofSize: 13)
+        descriptionView.textColor = .paper { $0.ink }
+        descriptionView.drawsBackground = false
+        descriptionView.textContainerInset = NSSize(width: 4, height: 6)
         descriptionView.delegate = self
-        descriptionScrollView.borderType = .bezelBorder
-        descriptionScrollView.heightAnchor.constraint(equalToConstant: 140).isActive = true
+        descriptionScrollView.borderType = .noBorder
+        descriptionScrollView.drawsBackground = false
+        descriptionScrollView.focusRingType = .none
+        place(descriptionScrollView, in: descriptionWell, insets: NSEdgeInsets(top: 2, left: 2, bottom: 2, right: 2))
+        descriptionWell.heightAnchor.constraint(equalToConstant: 140).isActive = true
 
-        for kind in RegionKind.allCases {
-            kindPopUp.menu?.addItem(NSMenuItem(title: kind.displayName, action: nil, keyEquivalent: ""))
+        kindChips.onChoose = { [weak self] kind in
+            self?.edit { try $0.setKind(kind) }
         }
-        kindPopUp.target = self
-        kindPopUp.action = #selector(kindChanged(_:))
 
         linksStack.orientation = .vertical
         linksStack.alignment = .leading
@@ -121,6 +140,11 @@ final class DetailsPanelController: NSViewController {
         scrollOptions.addArrangedSubview(row(label("Axis"), axisPopUp))
         scrollOptions.addArrangedSubview(
             row(label("Content"), contentWidthField, label("×"), contentHeightField, label("pt")))
+        scrollingWell.orientation = .vertical
+        scrollingWell.alignment = .leading
+        scrollingWell.spacing = 6
+        scrollingWell.addArrangedSubview(scrollsCheckbox)
+        scrollingWell.addArrangedSubview(scrollOptions)
 
         let form = NSStackView()
         form.orientation = .vertical
@@ -129,22 +153,21 @@ final class DetailsPanelController: NSViewController {
         form.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         form.translatesAutoresizingMaskIntoConstraints = false
         form.addArrangedSubview(sectionLabel("Title"))
-        form.addArrangedSubview(titleField)
-        form.setCustomSpacing(14, after: titleField)
+        form.addArrangedSubview(titleWell)
+        form.setCustomSpacing(16, after: titleWell)
         form.addArrangedSubview(sectionLabel("Description"))
-        form.addArrangedSubview(descriptionScrollView)
-        form.setCustomSpacing(14, after: descriptionScrollView)
+        form.addArrangedSubview(descriptionWell)
+        form.setCustomSpacing(16, after: descriptionWell)
         form.addArrangedSubview(sectionLabel("Kind"))
-        form.addArrangedSubview(kindPopUp)
-        form.setCustomSpacing(14, after: kindPopUp)
+        form.addArrangedSubview(kindChips)
+        form.setCustomSpacing(16, after: kindChips)
         form.addArrangedSubview(sectionLabel("Links"))
         form.addArrangedSubview(linksStack)
         form.addArrangedSubview(addLinkButton)
-        form.setCustomSpacing(14, after: addLinkButton)
+        form.setCustomSpacing(16, after: addLinkButton)
         form.addArrangedSubview(sectionLabel("Scrolling"))
-        form.addArrangedSubview(scrollsCheckbox)
-        form.addArrangedSubview(scrollOptions)
-        for view in [titleField, descriptionScrollView, linksStack] {
+        form.addArrangedSubview(scrollingWell)
+        for view in [titleWell, descriptionWell, kindChips, linksStack, scrollingWell] {
             view.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -32).isActive = true
         }
 
@@ -164,21 +187,77 @@ final class DetailsPanelController: NSViewController {
             document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
         ])
-        scrollView.frame = NSRect(x: 0, y: 0, width: Self.width, height: 500)
-        view = scrollView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(scrollView)
+        // The scroll view stops short of the card's rounded top and bottom, so scrolled content isn't cut square.
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
+            scrollView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8),
+            scrollView.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+        ])
+        let root = PanelRootView(color: { $0.chrome })
+        root.frame = NSRect(x: 0, y: 0, width: Self.width, height: 500)
+        place(card, in: root, insets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
+        root.onWindowChange = { [weak self] window in
+            self?.observeFocus(in: window)
+        }
+        view = root
         updateKeyViewLoop()
+    }
+
+    /// Adds `view` to `container`, inset on every side.
+    private func place(_ view: NSView, in container: NSView, insets: NSEdgeInsets) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: container.topAnchor, constant: insets.top),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -insets.bottom),
+            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: insets.left),
+            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -insets.right),
+        ])
+    }
+
+    /// Rings the title's or the description's well with the accent while it has focus.
+    private func observeFocus(in window: NSWindow?) {
+        firstResponderObservation = window?.observe(\.firstResponder, options: [.initial, .new]) {
+            [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updateWellFocus()
+            }
+        }
+    }
+
+    private func updateWellFocus() {
+        let responder = view.window?.firstResponder
+        let titleFocused = (responder as? NSTextView)?.delegate === titleField
+        let descriptionFocused = responder === descriptionView
+        for (well, focused) in [(titleWell, titleFocused), (descriptionWell, descriptionFocused)] {
+            well.borderWidth = 2
+            if focused {
+                well.borderColor = { $0.accent }
+            } else {
+                well.borderColor = nil
+            }
+        }
+    }
+
+    /// Whether the title's or the description's well shows the focus ring, for tests.
+    var focusedWell: PaperSurfaceView? {
+        [titleWell, descriptionWell].first { $0.borderColor != nil }
     }
 
     private func label(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.textColor = .secondaryLabelColor
+        label.font = PaperFont.rounded(ofSize: 12)
+        label.textColor = .paper { $0.secondaryInk }
         return label
     }
 
     private func sectionLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-        label.textColor = .secondaryLabelColor
+        label.font = PaperFont.rounded(ofSize: 11, weight: .semibold)
+        label.textColor = .paper { $0.secondaryInk }
         return label
     }
 
@@ -189,9 +268,10 @@ final class DetailsPanelController: NSViewController {
         return row
     }
 
-    /// Tab order, top to bottom. Pop-ups and buttons are skipped unless Full Keyboard Access is on, as everywhere.
+    /// Tab order, top to bottom. The kind chips are one stop. Pop-ups and buttons are skipped unless Full Keyboard
+    /// Access is on, as everywhere.
     private func updateKeyViewLoop() {
-        var views: [NSView] = [titleField, descriptionView, kindPopUp]
+        var views: [NSView] = [titleField, descriptionView, kindChips]
         for row in linkRows {
             views += [row.screenPopUp, row.triggerField, row.removeButton]
         }
@@ -220,7 +300,7 @@ final class DetailsPanelController: NSViewController {
         let fields = editor.fields
         titleField.stringValue = fields.title
         descriptionView.string = fields.description
-        kindPopUp.selectItem(at: RegionKind.allCases.firstIndex(of: fields.kind) ?? 0)
+        kindChips.selectedKind = fields.kind
         rebuildLinkRows()
         loadScroll()
     }
@@ -276,11 +356,6 @@ final class DetailsPanelController: NSViewController {
         } catch {
             NSSound.beep()
         }
-    }
-
-    @objc private func kindChanged(_ sender: Any?) {
-        let kind = RegionKind.allCases[max(kindPopUp.indexOfSelectedItem, 0)]
-        edit { try $0.setKind(kind) }
     }
 
     /// The links as the rows show them.
@@ -438,8 +513,35 @@ extension DetailsPanelController: NSTextViewDelegate {
     }
 }
 
-/// One link in the details panel: the target screen, an optional trigger, and a remove button.
-final class LinkRow: NSStackView {
+/// A row of the details card on a well: a rounded stack in the well color.
+class WellStackView: NSStackView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 6)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = PaperPalette.palette(for: effectiveAppearance).well.cgColor
+        layer?.cornerRadius = 8
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+/// One link in the details panel, on a well: an accent dot, the target screen, an optional trigger, and a remove
+/// button.
+final class LinkRow: WellStackView {
     let screenPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
     let triggerField = NSTextField(string: "")
     let removeButton = NSButton(title: "−", target: nil, action: nil)
@@ -447,7 +549,15 @@ final class LinkRow: NSStackView {
     init(screens: [Screen], link: Link) {
         super.init(frame: .zero)
         orientation = .horizontal
+        alignment = .centerY
         spacing = 6
+        let dot = PaperSurfaceView(color: { $0.accent }, cornerRadius: 4)
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+        ])
+        addArrangedSubview(dot)
         // Items are added one by one, since `addItems(withTitles:)` drops screens with the same name.
         for screen in screens {
             screenPopUp.menu?.addItem(NSMenuItem(title: screen.name, action: nil, keyEquivalent: ""))
@@ -500,6 +610,16 @@ final class PanelTextView: NSTextView {
         case #selector(redo(_:)): return undoManager?.canRedo ?? false
         default: return super.validateUserInterfaceItem(item)
         }
+    }
+}
+
+/// The details panel's background, which says when it joins a window so the panel can follow focus there.
+private final class PanelRootView: PaperSurfaceView {
+    var onWindowChange: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?(window)
     }
 }
 

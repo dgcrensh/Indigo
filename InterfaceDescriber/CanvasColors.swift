@@ -1,66 +1,69 @@
 import AppKit
+import DescriberCore
 
-/// The canvas colors, resolved for one appearance so layers can use them as `CGColor`s.
+/// The canvas colors, from the Paper palette for one appearance, as `CGColor`s for layers.
 struct CanvasColors {
-    /// Around the canvas bounds. The canvas view draws its own; exported images use this.
-    var background: CGColor
-    var boundsFill: CGColor
-    var boundsBorder: CGColor
-    var grid: CGColor
-    var regionFill: CGColor
-    var regionBorder: CGColor
+    /// A kind family's region colors.
+    struct Family {
+        var fill: CGColor
+        var border: CGColor
+        var title: CGColor
+        /// Descriptions shown on the canvas with `D`: the title color at 80%.
+        var description: CGColor
+    }
+
+    /// Around the screen. The canvas view draws its own; exported images use this.
+    var desk: CGColor
+    var gridDot: CGColor
+    /// The screen's bounds, drawn as a sheet with a border and a shadow.
+    var sheet: CGColor
+    var sheetBorder: CGColor
+    var sheetShadow: CGColor
+    /// The dashed viewport line of a scrolling screen.
+    var viewportLine: CGColor
     var outside: CGColor
-    var title: CGColor
-    /// Descriptions shown on the canvas with `D`.
-    var description: CGColor
     var emptyText: CGColor
-    /// Selected regions' borders, handle borders, and the outlines of a region being drawn and the marquee.
-    var selection: CGColor
+    /// Selected regions' borders, handle rings, and the outlines of a region being drawn and the marquee.
+    var accent: CGColor
     var handleFill: CGColor
-    var newRegionFill: CGColor
-    var marqueeFill: CGColor
+    /// Under the region being drawn and the marquee.
+    var accentWash: CGColor
     /// The link indicator on regions with links.
     var link: CGColor
-    /// The scroll indicators inside scrolling regions.
+    /// The scroll indicators inside scrolling regions and the dashed outline of a selected one's content.
     var scrollIndicator: CGColor
+    private var families: [KindFamily: Family]
 
     init(appearance: NSAppearance) {
-        var colors: [CGColor] = []
-        appearance.performAsCurrentDrawingAppearance {
-            colors = [
-                NSColor.textBackgroundColor,
-                NSColor.secondaryLabelColor,
-                NSColor.separatorColor.withAlphaComponent(0.4),
-                NSColor.controlAccentColor.withAlphaComponent(0.06),
-                NSColor.secondaryLabelColor,
-                NSColor.systemRed.withAlphaComponent(0.2),
-                NSColor.labelColor,
-                NSColor.secondaryLabelColor,
-                NSColor.controlAccentColor,
-                NSColor.white,
-                NSColor.controlAccentColor.withAlphaComponent(0.12),
-                NSColor.controlAccentColor.withAlphaComponent(0.1),
-                NSColor.secondaryLabelColor,
-                NSColor.linkColor,
-                NSColor.tertiaryLabelColor,
-                NSColor.underPageBackgroundColor,
-            ].map(\.cgColor)
+        self.init(palette: .palette(for: appearance))
+    }
+
+    init(palette: PaperPalette) {
+        desk = palette.desk.cgColor
+        gridDot = palette.gridDot.cgColor
+        sheet = palette.sheet.cgColor
+        sheetBorder = palette.sheetBorder.cgColor
+        sheetShadow = palette.sheetShadow.cgColor
+        viewportLine = palette.accent.withAlpha(0.6).cgColor
+        outside = palette.outside.cgColor
+        emptyText = palette.secondaryInk.cgColor
+        accent = palette.accent.cgColor
+        handleFill = palette.card.cgColor
+        accentWash = palette.accent.withAlpha(0.08).cgColor
+        link = palette.accent.cgColor
+        scrollIndicator = palette.accent.withAlpha(0.5).cgColor
+        var families: [KindFamily: Family] = [:]
+        for family in KindFamily.allCases {
+            let colors = palette.colors(for: family)
+            families[family] = Family(
+                fill: colors.fill.cgColor, border: colors.border.cgColor, title: colors.text.cgColor,
+                description: colors.text.withAlpha(0.8).cgColor)
         }
-        boundsFill = colors[0]
-        boundsBorder = colors[1]
-        grid = colors[2]
-        regionFill = colors[3]
-        regionBorder = colors[4]
-        outside = colors[5]
-        title = colors[6]
-        emptyText = colors[7]
-        selection = colors[8]
-        handleFill = colors[9]
-        newRegionFill = colors[10]
-        marqueeFill = colors[11]
-        description = colors[12]
-        link = colors[13]
-        scrollIndicator = colors[14]
-        background = colors[15]
+        self.families = families
+    }
+
+    /// The colors regions of `kind` are drawn in.
+    func family(of kind: RegionKind) -> Family {
+        families[kind.family] ?? families[.neutral]!
     }
 }

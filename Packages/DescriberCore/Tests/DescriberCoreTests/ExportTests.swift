@@ -168,17 +168,18 @@ final class ProjectJSONExportTests: XCTestCase {
 }
 
 final class ScreenImageTests: XCTestCase {
-    func testAScreenWhoseRegionsFitIsItsCanvasBounds() {
+    func testAScreenWhoseRegionsFitIsItsCanvasBoundsAndTheShadow() {
         let (_, screen, _, _, _) = Fixtures.nestedProject()
-        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: 0, y: 0, w: 400, h: 800))
+        XCTAssertEqual(PaperShapes.shadowMargin, 16)
+        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: -16, y: -16, w: 432, h: 832))
         screen.scroll = Scroll(axis: .vertical, contentWidth: 400, contentHeight: 1200)
-        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: 0, y: 0, w: 400, h: 1200))
+        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: -16, y: -16, w: 432, h: 1232))
     }
 
     func testRegionsOutsideTheBoundsWidenIt() {
         let (_, screen, _, _, side) = Fixtures.nestedProject()
         side.frame = Frame(x: 350, y: -20, w: 100, h: 100)
-        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: 0, y: -20, w: 450, h: 820))
+        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: -16, y: -20, w: 466, h: 836))
     }
 
     func testContentScrolledOutOfViewDoesNotWidenIt() {
@@ -188,11 +189,11 @@ final class ScreenImageTests: XCTestCase {
             scroll: Scroll(axis: .vertical, contentWidth: 100, contentHeight: 900), children: [row])
         let screen = Screen(name: "S", viewport: Viewport(width: 100, height: 800), regions: [list])
         row.frame = Frame(x: 0, y: 1400, w: 100, h: 40)
-        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: 0, y: 0, w: 100, h: 800))
+        XCTAssertEqual(ScreenImage.extent(of: screen), Frame(x: -16, y: -16, w: 132, h: 832))
         // Scrolled so the row shows inside the list, which is inside the bounds.
         XCTAssertEqual(
             ScreenImage.extent(of: screen, offsets: [list.id: ScrollOffset(x: 0, y: 700)]),
-            Frame(x: 0, y: 0, w: 100, h: 800))
+            Frame(x: -16, y: -16, w: 132, h: 832))
     }
 
     func testFileNamesAreScreenSlugs() {
