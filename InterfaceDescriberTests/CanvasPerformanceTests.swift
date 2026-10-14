@@ -29,13 +29,17 @@ final class CanvasPerformanceTests: XCTestCase {
         let start = Date()
         for value in values {
             step(value)
-            for box in canvas.regionsLayer.sublayers ?? [] {
-                for sublayer in box.sublayers ?? [] {
-                    sublayer.displayIfNeeded()
-                }
-            }
+            Self.displayIfNeeded(canvas.regionsLayer)
         }
         return Date().timeIntervalSince(start) / Double(values.count) * 1000
+    }
+
+    /// Redraws everything under `layer` that is marked for display, as the next frame would.
+    private static func displayIfNeeded(_ layer: CALayer) {
+        layer.displayIfNeeded()
+        for sublayer in layer.sublayers ?? [] {
+            displayIfNeeded(sublayer)
+        }
     }
 
     @MainActor
@@ -48,6 +52,12 @@ final class CanvasPerformanceTests: XCTestCase {
         let anchor = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
         canvas.camera = Camera(zoom: 1)
         let reload = time(canvas, Array(0..<5)) { _ in canvas.reload() }
+        // One region retitled, as each keystroke in the details panel does.
+        let item = try XCTUnwrap(screen.regions.first?.children.first?.children.first)
+        let retitle = time(canvas, Array(0..<20)) { step in
+            item.title = "Retitled \(step)"
+            canvas.reload()
+        }
         let pan = time(canvas, Array(1...20)) { offset in
             canvas.camera = Camera(zoom: 1, panX: Double(offset), panY: Double(offset))
         }
@@ -61,7 +71,8 @@ final class CanvasPerformanceTests: XCTestCase {
         }
 
         for (name, milliseconds) in [
-            ("reload after an edit", reload), ("pan", pan), ("pinch at about 100 %", pinch),
+            ("reload after an edit", reload), ("reload after retitling one region", retitle), ("pan", pan),
+            ("pinch at about 100 %", pinch),
             ("pinch with everything visible", pinchFitted),
         ] {
             print(String(format: "Canvas, 500 regions, %@: %.2f ms per frame", name, milliseconds))
@@ -70,6 +81,39 @@ final class CanvasPerformanceTests: XCTestCase {
         XCTAssertLessThan(pinch, 50)
         XCTAssertLessThan(pinchFitted, 50)
         XCTAssertLessThan(reload, 100)
+        XCTAssertLessThan(retitle, 16)
+    }
+
+    /// A run of zoom changes, as a pinch makes, clips the titles at their size rather than re-truncating them every
+    /// frame, and fits them once the zoom stays put.
+    @MainActor
+    func testTitlesAreFittedOnceAZoomRunSettles() throws {
+        let (canvas, _) = try makeCanvas()
+        canvas.camera = Camera(zoom: 1)
+        XCTAssertTrue(canvas.isTextSettled, "a single zoom change fits the text at once")
+        for step in 1...5 {
+            canvas.camera = Camera(zoom: 1 - 0.05 * Double(step))
+        }
+        XCTAssertFalse(canvas.isTextSettled, "titles that would truncate differently wait for the zoom to settle")
+        let deadline = Date().addingTimeInterval(2)
+        while !canvas.isTextSettled && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertTrue(canvas.isTextSettled, "the text is fitted once the zoom stays put")
+
+        // Settled text is laid out as a fresh canvas at the same zoom lays it out.
+        let (fresh, _) = try makeCanvas()
+        fresh.camera = canvas.camera
+        XCTAssertEqual(Self.titleFrames(canvas), Self.titleFrames(fresh))
+    }
+
+    /// Each region's title frame in the box's coordinates, or `.null` for a hidden title, in z-order.
+    @MainActor
+    private static func titleFrames(_ canvas: CanvasView) -> [CGRect] {
+        (canvas.regionsLayer.sublayers ?? []).compactMap { box in
+            let title = box.sublayers?.lazy.compactMap { $0.sublayers?.first { $0 is CATextLayer } }.first
+            return title.map { $0.isHidden ? .null : box.convert($0.frame, from: $0.superlayer) }
+        }
     }
 
     @MainActor
@@ -120,11 +164,7 @@ final class CanvasPerformanceTests: XCTestCase {
             canvas.canvasDragged(
                 to: CGPoint(x: start.x + delta.dx * progress, y: start.y + delta.dy * progress), optionHeld: false)
             canvas.canvasView.layer?.displayIfNeeded()
-            for box in canvas.canvasView.regionsLayer.sublayers ?? [] {
-                for sublayer in box.sublayers ?? [] {
-                    sublayer.displayIfNeeded()
-                }
-            }
+            Self.displayIfNeeded(canvas.canvasView.regionsLayer)
         }
         let milliseconds = Date().timeIntervalSince(begin) / Double(frames) * 1000
         canvas.canvasReleased(at: end, optionHeld: false)

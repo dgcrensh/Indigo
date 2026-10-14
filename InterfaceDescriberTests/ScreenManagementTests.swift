@@ -450,19 +450,30 @@ final class ScreenManagementTests: XCTestCase {
         XCTAssertTrue(window.titlebarAppearsTransparent)
         XCTAssertEqual(window.subtitle, document.model.activeScreen?.name)
 
+        // The subtitle follows the model a run-loop turn later, so each step waits for it rather than a fixed time.
         controller.showNextScreen(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         XCTAssertNotEqual(document.model.activeScreenID, login)
-        XCTAssertEqual(window.subtitle, document.model.activeScreen?.name)
+        let next = try XCTUnwrap(document.model.activeScreen?.name)
+        waitUntil { window.subtitle == next }
+        XCTAssertEqual(window.subtitle, next)
 
         let active = try XCTUnwrap(document.model.activeScreenID)
         step(document) { screens.renameScreen(active, to: "Renamed") }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        waitUntil { window.subtitle == "Renamed" }
         XCTAssertEqual(window.subtitle, "Renamed")
 
         document.model.activeScreenID = nil
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        waitUntil { window.subtitle == "" }
         XCTAssertEqual(window.subtitle, "")
+    }
+
+    /// Runs the main run loop until `condition` holds, for up to two seconds.
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !condition() && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
     }
 
     @MainActor
