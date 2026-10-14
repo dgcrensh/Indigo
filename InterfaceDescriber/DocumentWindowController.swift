@@ -123,7 +123,7 @@ final class DocumentWindowController: NSWindowController {
         canvasController.paste()
     }
 
-    @objc func selectAll(_ sender: Any?) {
+    override func selectAll(_ sender: Any?) {
         canvasController.selectAll()
     }
 
