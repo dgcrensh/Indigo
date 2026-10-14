@@ -11,8 +11,9 @@ final class DocumentWindowController: NSWindowController {
     let splitViewController = NSSplitViewController()
     let canvasController: CanvasViewController
     let detailsController: DetailsPanelController
-    /// The region editor the details panel shows, to tell opening from switching.
-    private var shownDetails: ObjectIdentifier?
+    /// The region editor the details panel shows, to tell opening from switching. Held strongly, so a new editor
+    /// can't reuse its address and look like the same one.
+    private var shownDetails: RegionEditor?
 
     init(model: DocumentModel) {
         canvasController = CanvasViewController(model: model)
@@ -120,10 +121,9 @@ final class DocumentWindowController: NSWindowController {
     /// it opens, refits when it switches regions, and slides it out and restores the canvas when it closes.
     func updateDetails() {
         let editor = canvasController.model.details
-        let shown = editor.map(ObjectIdentifier.init)
-        guard shown != shownDetails else { return }
+        guard editor !== shownDetails else { return }
         let wasOpen = shownDetails != nil
-        shownDetails = shown
+        shownDetails = editor
         let animated = window?.isVisible == true
 
         if let editor {
