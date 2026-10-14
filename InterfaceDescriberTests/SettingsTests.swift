@@ -217,13 +217,17 @@ final class SettingsTests: XCTestCase {
         defer { controller.close() }
         try write(#"{"defaultViewport": "ipad"}"#)
         store.reload()
+        document.undoManager?.beginUndoGrouping()
         controller.screenController.newScreen()
+        document.undoManager?.endUndoGrouping()
         XCTAssertEqual(document.model.activeScreen?.viewport, Viewport(preset: "ipad", width: 820, height: 1180))
 
         try write(#"{"defaultViewport": "this-device"}"#)
         store.reload()
         controller.screenController.displaySize = { CGSize(width: 1512, height: 982) }
+        document.undoManager?.beginUndoGrouping()
         controller.screenController.newScreen()
+        document.undoManager?.endUndoGrouping()
         XCTAssertEqual(
             document.model.activeScreen?.viewport,
             Viewport(preset: ViewportPresets.thisDeviceID, width: 1512, height: 982))
