@@ -4,7 +4,7 @@ How milestone 14 of the [v1 roadmap](../v1-roadmap.md) is built, the second of t
 the palette, shapes and card style from [m13-paper-look.md](m13-paper-look.md) and the sidebar from
 [m8-screens-links.md](m8-screens-links.md).
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

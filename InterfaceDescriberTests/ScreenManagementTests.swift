@@ -378,4 +378,98 @@ final class ScreenManagementTests: XCTestCase {
             controller.validateMenuItem(item(#selector(Controller.removeFromVariantGroup(_:)))),
             "Reset Password isn't in a group")
     }
+    // MARK: Sidebar cards and title bar (milestone 14)
+
+    /// Lets the thumbnail throttle pass.
+    @MainActor
+    private func waitForThumbnails() {
+        RunLoop.main.run(until: Date().addingTimeInterval(DocumentModel.thumbnailThrottle + 0.15))
+    }
+
+    @MainActor
+    func testTheSidebarHasACardPerScreenNamingItsViewport() throws {
+        let (document, _, _) = try makeWindow()
+        let outline = SidebarOutline(project: document.model.project)
+        let cards = outline.rows.compactMap(\.screen).compactMap { document.model.project.screen(withID: $0) }
+        XCTAssertEqual(cards.count, document.model.project.screens.count)
+        let menu = try XCTUnwrap(document.model.project.screen(withID: accountMenu))
+        XCTAssertTrue(menu.sidebarDetail().hasPrefix("Menu · "), menu.sidebarDetail())
+        let login = try XCTUnwrap(document.model.project.screen(withID: login))
+        XCTAssertEqual(login.sidebarDetail(), ViewportPresets.shortName(for: login.viewport))
+    }
+
+    @MainActor
+    func testOnlyTheEditedScreensThumbnailUpdatesAfterTheThrottle() throws {
+        let (document, controller, _) = try makeWindow()
+        defer { controller.close() }
+        let model = document.model
+        let loginRevision = model.thumbnailRevision(for: login)
+        let settingsRevision = model.thumbnailRevision(for: settings)
+        let (loginBefore, settingsBefore) = (loginRevision.value, settingsRevision.value)
+
+        for _ in 0..<2 {
+            document.undoManager?.beginUndoGrouping()
+            try document.perform(MoveRegions(screen: login, regions: [signIn], dx: 8, dy: 0))
+            document.undoManager?.endUndoGrouping()
+        }
+        XCTAssertEqual(loginRevision.value, loginBefore, "nothing redraws before the throttle passes")
+        waitForThumbnails()
+        XCTAssertEqual(loginRevision.value, loginBefore + 1, "two edits in a burst redraw once")
+        XCTAssertEqual(settingsRevision.value, settingsBefore)
+    }
+
+    @MainActor
+    func testADragUpdatesTheThumbnailOnlyWhenItEnds() throws {
+        let (document, controller, _) = try makeWindow()
+        defer { controller.close() }
+        let canvas = controller.canvasController
+        let revision = document.model.thumbnailRevision(for: login)
+        let before = revision.value
+        let frame = try XCTUnwrap(document.model.project.region(withID: signIn)?.region.frame)
+        let start = CGPoint(x: frame.x + frame.w / 2, y: frame.y + frame.h / 2)
+        let end = CGPoint(x: start.x + 40, y: start.y)
+        canvas.choose(.select)
+        step(document) {
+            canvas.canvasPressed(at: start, modifiers: [])
+            canvas.canvasDragged(to: end, optionHeld: false)
+        }
+        waitForThumbnails()
+        XCTAssertEqual(revision.value, before, "a drag in progress changes nothing")
+        step(document) {
+            canvas.canvasReleased(at: end, optionHeld: false)
+        }
+        waitForThumbnails()
+        XCTAssertEqual(revision.value, before + 1)
+    }
+
+    @MainActor
+    func testTheSubtitleIsTheActiveScreensName() throws {
+        let (document, controller, screens) = try makeWindow()
+        defer { controller.close() }
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertTrue(window.titlebarAppearsTransparent)
+        XCTAssertEqual(window.subtitle, document.model.activeScreen?.name)
+
+        controller.showNextScreen(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertNotEqual(document.model.activeScreenID, login)
+        XCTAssertEqual(window.subtitle, document.model.activeScreen?.name)
+
+        let active = try XCTUnwrap(document.model.activeScreenID)
+        step(document) { screens.renameScreen(active, to: "Renamed") }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(window.subtitle, "Renamed")
+
+        document.model.activeScreenID = nil
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(window.subtitle, "")
+    }
+
+    @MainActor
+    func testTheAppHasItsOwnIcon() throws {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") as? String, "AppIcon")
+        let icon = try XCTUnwrap(NSImage(named: "AppIcon"), "the asset catalog has the icon")
+        let widths = Set(icon.representations.map(\.pixelsWide))
+        XCTAssertTrue(widths.contains(1024) || widths.contains(512), "\(widths)")
+    }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import DescriberCore
+import Observation
 import SwiftUI
 
 /// A document window: the screen sidebar on the left (hidden by default), the canvas in the middle, and the details
@@ -34,6 +35,9 @@ final class DocumentWindowController: NSWindowController {
             defer: false
         )
         window.minSize = NSSize(width: 480, height: 320)
+        // The title bar blends into the paper chrome around the canvas.
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = .paper { $0.chrome }
         super.init(window: window)
 
         let sidebar = NSSplitViewItem(
@@ -77,6 +81,31 @@ final class DocumentWindowController: NSWindowController {
         // Snapping starts as the settings say when a window opens; after that `S` decides.
         model.snappingEnabled = settingsStore.settings.snapping
         observeSettings(previous: nil)
+        observeActiveScreen()
+    }
+
+    // MARK: Title bar
+
+    /// Keeps the subtitle on the active screen's name, through switches, renames, undo and Revert.
+    private func observeActiveScreen() {
+        updateSubtitle()
+        let model = canvasController.model
+        withObservationTracking {
+            _ = model.activeScreenID
+            _ = model.revision
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.observeActiveScreen()
+            }
+        }
+    }
+
+    /// Shows the active screen's name under the document's name, or nothing when there is no screen.
+    func updateSubtitle() {
+        let name = canvasController.model.activeScreen?.name ?? ""
+        if window?.subtitle != name {
+            window?.subtitle = name
+        }
     }
 
     @available(*, unavailable)
