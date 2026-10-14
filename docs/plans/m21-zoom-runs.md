@@ -6,7 +6,7 @@ How milestone 21 of the [v1 roadmap](../v1-roadmap.md) is built. Builds on the z
 [m20-visible-layout.md](m20-visible-layout.md). From the profile in `real-hardware-profile.md` in the project files
 (items 1 and 2).
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

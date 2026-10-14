@@ -256,18 +256,18 @@ final class CanvasViewController: NSViewController {
 
     func zoomIn() {
         guard canvasView.screen != nil else { return }
-        canvasView.change(to: canvasView.camera.zoomedIn(anchor: center))
+        canvasView.step(to: canvasView.camera.zoomedIn(anchor: center))
     }
 
     func zoomOut() {
         guard canvasView.screen != nil else { return }
-        canvasView.change(to: canvasView.camera.zoomedOut(anchor: center))
+        canvasView.step(to: canvasView.camera.zoomedOut(anchor: center))
     }
 
     /// 100 % with the viewport centered.
     func actualSize() {
         guard let screen = canvasView.screen else { return }
-        canvasView.change(to: .actualSize(centering: screen.viewportFrame.cgRect, viewSize: canvasView.bounds.size))
+        canvasView.step(to: .actualSize(centering: screen.viewportFrame.cgRect, viewSize: canvasView.bounds.size))
     }
 
     // MARK: Details panel camera
@@ -312,14 +312,20 @@ final class CanvasViewController: NSViewController {
         cameraBeforeDetails != nil
     }
 
+    /// The animation is a zoom run on the canvas (milestone 21): it begins before the first frame and ends on the last,
+    /// before the completion runs.
     private func animateCamera(to target: Camera, completion: (() -> Void)?) {
-        stopCameraAnimation()
+        // An animation under way hands its zoom run to this one rather than ending it.
+        cameraAnimation?.link.invalidate()
+        cameraAnimation = nil
         let start = canvasView.camera
         guard canvasView.window?.isVisible == true, start != target else {
             canvasView.camera = target
+            canvasView.endZoomRun()
             completion?()
             return
         }
+        canvasView.beginZoomRun()
         let link = canvasView.displayLink(target: self, selector: #selector(stepCameraAnimation(_:)))
         cameraAnimation = CameraAnimation(
             start: start, target: target, began: CACurrentMediaTime(), completion: completion, link: link)
@@ -339,13 +345,16 @@ final class CanvasViewController: NSViewController {
         if t >= 1 {
             link.invalidate()
             cameraAnimation = nil
+            canvasView.endZoomRun()
             animation.completion?()
         }
     }
 
     private func stopCameraAnimation() {
-        cameraAnimation?.link.invalidate()
+        guard let animation = cameraAnimation else { return }
+        animation.link.invalidate()
         cameraAnimation = nil
+        canvasView.endZoomRun()
     }
 
     // MARK: Tools, snapping and the grid

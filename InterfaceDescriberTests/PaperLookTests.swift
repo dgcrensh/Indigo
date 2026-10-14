@@ -64,7 +64,8 @@ final class PaperLookTests: XCTestCase {
         }
         XCTAssertEqual(view.cornerRadius(of: button), 6)
         XCTAssertEqual(view.cornerRadius(of: tiny), 1, "a small region's corners are capped")
-        canvas.canvasView.camera = Camera(zoom: 2)
+        // A zoom command's step, so it doesn't join the change above in a zoom run drawn with a transform.
+        view.step(to: Camera(zoom: 2))
         XCTAssertEqual(view.cornerRadius(of: button), 12, "corners scale with zoom")
     }
 
