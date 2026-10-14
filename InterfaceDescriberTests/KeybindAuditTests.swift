@@ -17,7 +17,9 @@ final class KeybindAuditTests: XCTestCase {
         document.undoManager?.groupsByEvent = false
         let screen = try XCTUnwrap(document.model.activeScreen)
         let create = CreateRegion(screen: screen.id, frame: Frame(x: 16, y: 16, w: 80, h: 40), title: "Box")
+        document.undoManager?.beginUndoGrouping()
         try document.perform(create)
+        document.undoManager?.endUndoGrouping()
         controller.canvasController.update()
         try document.model.openDetails(for: create.id)
         XCTAssertTrue(controller.isEditingText, "the title has focus when the panel opens")
