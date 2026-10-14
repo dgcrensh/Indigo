@@ -293,10 +293,8 @@ final class ScreenManagementTests: XCTestCase {
         let (document, controller, screens) = try makeWindow()
         defer { controller.close() }
         let canvas = controller.canvasController
-        try document.perform(
-            RegionCommands.setLinks(
-                [Link(screen: reset, trigger: "click"), Link(screen: accountMenu, trigger: "right-click")],
-                of: forgotPassword))
+        let links = [Link(screen: reset, trigger: "click"), Link(screen: accountMenu, trigger: "right-click")]
+        step(document) { try? document.perform(RegionCommands.setLinks(links, of: forgotPassword)) }
         var offered: [String] = []
         screens.chooseLink = { targets, _, completion in
             offered = targets.map(\.title)
@@ -316,7 +314,7 @@ final class ScreenManagementTests: XCTestCase {
         let canvas = controller.canvasController
         XCTAssertEqual(canvas.canvasView.linkedLayerIDs, [signIn, forgotPassword])
 
-        try document.perform(RegionCommands.setLinks([], of: signIn))
+        step(document) { try? document.perform(RegionCommands.setLinks([], of: signIn)) }
         canvas.update()
         XCTAssertEqual(canvas.canvasView.linkedLayerIDs, [forgotPassword])
     }
