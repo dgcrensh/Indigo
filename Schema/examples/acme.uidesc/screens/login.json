@@ -1,0 +1,98 @@
+{
+  "id": "6513270e-269e-4d37-b2a7-4de452e6b438",
+  "name": "Login",
+  "kind": "screen",
+  "viewport": {
+    "preset": "iphone-15",
+    "width": 393,
+    "height": 852
+  },
+  "regions": [
+    {
+      "id": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+      "title": "Logo",
+      "kind": "image",
+      "x": 148,
+      "y": 96,
+      "w": 96,
+      "h": 96,
+      "description": "App logo, centered. No text."
+    },
+    {
+      "id": "90c192cf-d3ac-44af-8f21-ddb66cad4a26",
+      "title": "Sign-in form",
+      "kind": "container",
+      "x": 16,
+      "y": 240,
+      "w": 361,
+      "h": 264,
+      "description": "Vertically stacked form, centered.",
+      "children": [
+        {
+          "id": "a170b338-3926-4059-b28c-105d1fb17c23",
+          "title": "Email field",
+          "kind": "input",
+          "x": 32,
+          "y": 256,
+          "w": 329,
+          "h": 44,
+          "description": "Single-line input with placeholder 'you@example.com'. Label above it."
+        },
+        {
+          "id": "0fd630f1-f29d-4da9-953f-48f1a09f76b5",
+          "title": "Password field",
+          "kind": "input",
+          "x": 32,
+          "y": 316,
+          "w": 329,
+          "h": 44,
+          "description": "Secure input. A show/hide toggle sits at the trailing edge."
+        },
+        {
+          "id": "0cb1e29c-658c-4a14-95e6-0af593bd04cf",
+          "title": "Sign in",
+          "kind": "button",
+          "x": 32,
+          "y": 384,
+          "w": 329,
+          "h": 48,
+          "description": "Primary button. Disabled until both fields have text.",
+          "linksTo": [
+            {
+              "screen": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+              "screenName": "Settings",
+              "trigger": "click, after a successful sign-in"
+            }
+          ]
+        },
+        {
+          "id": "8e81973e-0bec-47b0-b898-d190f9ebdacc",
+          "title": "Forgot password",
+          "kind": "button",
+          "x": 32,
+          "y": 456,
+          "w": 140,
+          "h": 24,
+          "description": "Text-style link button.",
+          "linksTo": [
+            {
+              "screen": "9531985d-5d9d-49f8-9818-e811892f902b",
+              "screenName": "Reset Password",
+              "trigger": "click"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+      "title": "Footer",
+      "kind": "text",
+      "x": 16,
+      "y": 788,
+      "w": 361,
+      "h": 32,
+      "description": "Version number and a link to the privacy policy, small and muted."
+    }
+  ]
+}
