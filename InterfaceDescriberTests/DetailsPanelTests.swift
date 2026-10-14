@@ -155,7 +155,11 @@ final class DetailsPanelTests: XCTestCase {
         click(canvas, at: CGPoint(x: 30, y: 210), in: document)
         XCTAssertEqual(document.model.details?.region, second.id)
         XCTAssertEqual(document.model.selection, [second.id])
-        XCTAssertEqual(panel.titleField.stringValue, "Second")
+        XCTAssertEqual(first.title, "First")
+        XCTAssertEqual(
+            panel.titleField.stringValue, "Second",
+            "editor: \(String(describing: panel.titleField.currentEditor()?.string)), "
+                + "responder: \(String(describing: controller.window?.firstResponder))")
         XCTAssertEqual(first.description, "Top.")
         XCTAssertEqual(document.undoManager?.undoActionName, "Edit Description", "switching commits")
         XCTAssertTrue(controller.isShowingDetails)

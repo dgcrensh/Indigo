@@ -32,8 +32,9 @@ final class DetailsPanelController: NSViewController {
     /// typing, and typing never leaves steps on the document's stack. The description and the panel's field editor
     /// use it, and it is cleared whenever the panel shows another region or closes.
     let textUndoManager = UndoManager()
-    /// The field editor for the panel's text fields, which the window hands out through its delegate.
-    let fieldEditor = PanelTextView()
+    /// The field editor for the panel's text fields, which the window hands out through its delegate. A fresh one
+    /// is made for each region, so no editing state carries over from the last.
+    private(set) var fieldEditor = PanelTextView()
 
     init(model: DocumentModel) {
         self.model = model
@@ -48,13 +49,19 @@ final class DetailsPanelController: NSViewController {
         descriptionScrollView.documentView = textView
         super.init(nibName: nil, bundle: nil)
         textView.panelUndoManager = textUndoManager
-        fieldEditor.isFieldEditor = true
-        fieldEditor.panelUndoManager = textUndoManager
+        fieldEditor = makeFieldEditor()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used")
+    }
+
+    private func makeFieldEditor() -> PanelTextView {
+        let editor = PanelTextView()
+        editor.isFieldEditor = true
+        editor.panelUndoManager = textUndoManager
+        return editor
     }
 
     var editor: RegionEditor? {
@@ -207,13 +214,11 @@ final class DetailsPanelController: NSViewController {
         if let window = view.window, isEditingText(window.firstResponder) {
             window.makeFirstResponder(nil)
         }
+        titleField.abortEditing()
+        fieldEditor = makeFieldEditor()
         textUndoManager.removeAllActions()
         let fields = editor.fields
         titleField.stringValue = fields.title
-        // If the title is still being edited, its field editor holds the last region's text.
-        if let fieldEditor = titleField.currentEditor() {
-            fieldEditor.string = fields.title
-        }
         descriptionView.string = fields.description
         kindPopUp.selectItem(at: RegionKind.allCases.firstIndex(of: fields.kind) ?? 0)
         rebuildLinkRows()
