@@ -5,7 +5,7 @@ How milestone 24 of the [v1 roadmap](../v1-roadmap.md) is built. Builds on the s
 [m16-chrome-responsiveness.md](m16-chrome-responsiveness.md). From the profile in `real-hardware-profile.md` in the
 project files (items 7 and 8). Independent of milestones 20 to 23.
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

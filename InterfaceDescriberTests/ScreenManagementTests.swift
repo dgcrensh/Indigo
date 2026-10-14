@@ -442,6 +442,51 @@ final class ScreenManagementTests: XCTestCase {
         XCTAssertEqual(revision.value, before + 1)
     }
 
+    // MARK: Sidebar cost (milestone 24)
+
+    /// Opens the sidebar on a shown window and lets SwiftUI draw it.
+    @MainActor
+    private func showSidebar(_ controller: DocumentWindowController) {
+        controller.showWindow(nil)
+        controller.sidebarItem.isCollapsed = false
+        controller.window?.layoutIfNeeded()
+        controller.window?.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        controller.window?.displayIfNeeded()
+    }
+
+    @MainActor
+    func testSwitchingScreensRedrawsOnlyThePreviousAndNewActiveCards() throws {
+        let (document, controller, _) = try makeWindow()
+        defer { controller.close() }
+        showSidebar(controller)
+        XCTAssertGreaterThan(ScreenCard.bodyCounts[login, default: 0], 0, "the sidebar drew its cards")
+        XCTAssertGreaterThan(ScreenCard.bodyCounts[accountMenu, default: 0], 0, "the sidebar drew its cards")
+        let loginThumbnail = document.model.thumbnailRevision(for: login)
+        XCTAssertEqual(loginThumbnail.computations, 1)
+
+        ScreenCard.bodyCounts = [:]
+        document.model.show(settings)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        controller.window?.displayIfNeeded()
+        XCTAssertEqual(Set(ScreenCard.bodyCounts.keys), [login, settings])
+        XCTAssertEqual(loginThumbnail.computations, 1, "a redraw at the same revision reuses the thumbnail")
+    }
+
+    @MainActor
+    func testAThumbnailIsComputedOncePerRevision() throws {
+        let screen = try XCTUnwrap(Project.stressTest(regionCount: 300).screens.first)
+        let revision = ThumbnailRevision()
+        let first = revision.thumbnail(for: screen, width: 40, height: 72)
+        let second = revision.thumbnail(for: screen, width: 40, height: 72)
+        XCTAssertEqual(revision.computations, 1)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first, ScreenThumbnail.rects(for: screen, width: 40, height: 72))
+        revision.value += 1
+        _ = revision.thumbnail(for: screen, width: 40, height: 72)
+        XCTAssertEqual(revision.computations, 2, "a new revision computes it again")
+    }
+
     @MainActor
     func testTheSubtitleIsTheActiveScreensName() throws {
         let (document, controller, screens) = try makeWindow()

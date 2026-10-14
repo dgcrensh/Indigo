@@ -10,13 +10,15 @@ struct ScreenSidebar: View {
     @Bindable var model: DocumentModel
     let controller: ScreenController
     @State private var renaming: ScreenID?
-    @State private var draftName = ""
-    @FocusState private var nameFieldFocused: Bool
 
     // The body reads the project, its screens and the settings through Observation, so it redraws when what it shows
-    // changes, not after every edit. Region edits reach a card only through its thumbnail revision.
+    // changes, not after every edit. Region edits reach a card only through its thumbnail revision. It reads the
+    // active screen once and hands each card whether it is the active one, so a screen switch changes two cards'
+    // inputs and the rest are skipped (milestone 24).
     var body: some View {
         let outline = SidebarOutline(project: model.project)
+        let activeID = model.activeScreenID
+        let userPresets = controller.presets.user
         VStack(spacing: 0) {
             // No list selection: the active card draws its own accent ring instead of the system highlight.
             List {
@@ -27,8 +29,13 @@ struct ScreenSidebar: View {
                             .paperListRow(leading: 12)
                     case .screen(let id, let group):
                         if let screen = model.project.screen(withID: id) {
-                            screenCard(screen)
-                                .paperListRow(leading: group != nil ? 20 : 10)
+                            ScreenCard(
+                                screen: screen, isActive: activeID == id, isRenaming: renaming == id,
+                                renaming: $renaming, revision: model.thumbnailRevision(for: id), model: model,
+                                controller: controller, userPresets: userPresets
+                            )
+                            .equatable()
+                            .paperListRow(leading: group != nil ? 20 : 10)
                         }
                     }
                 }
@@ -63,45 +70,6 @@ struct ScreenSidebar: View {
             }
     }
 
-    /// A screen's card: its thumbnail, its name, and its viewport, with an accent ring while it is showing.
-    private func screenCard(_ screen: Screen) -> some View {
-        let isActive = model.activeScreenID == screen.id
-        return HStack(spacing: 10) {
-            ScreenThumbnailView(screen: screen, revision: model.thumbnailRevision(for: screen.id))
-            VStack(alignment: .leading, spacing: 2) {
-                if renaming == screen.id {
-                    TextField("Name", text: $draftName)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .focused($nameFieldFocused)
-                        .onSubmit { commitRename() }
-                        .onExitCommand { renaming = nil }
-                        .onAppear { nameFieldFocused = true }
-                        .onChange(of: nameFieldFocused) { _, focused in
-                            if !focused { commitRename() }
-                        }
-                } else {
-                    Text(screen.name)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color(nsColor: .paper { $0.ink }))
-                        .lineLimit(1)
-                }
-                Text(screen.sidebarDetail(userPresets: controller.presets.user))
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(Color(nsColor: .paper { $0.secondaryInk }))
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(8)
-        .paperCard(selected: isActive)
-        .contentShape(Rectangle())
-        .onTapGesture { model.show(screen.id) }
-        .contextMenu { screenMenu(screen) }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
-    }
-
     /// The dashed card under the last screen, which adds one.
     private var newScreenCard: some View {
         Button {
@@ -121,8 +89,89 @@ struct ScreenSidebar: View {
         .buttonStyle(.plain)
     }
 
+    /// The sidebar icon for each screen kind.
+    static func symbol(for kind: ScreenKind) -> String {
+        switch kind {
+        case .screen: "rectangle"
+        case .modal: "rectangle.center.inset.filled"
+        case .sheet: "rectangle.bottomhalf.inset.filled"
+        case .popover: "bubble.middle.top"
+        case .menu: "filemenu.and.selection"
+        case .alert: "exclamationmark.triangle"
+        }
+    }
+}
+
+/// A screen's card in the sidebar: its thumbnail, its name, and its viewport, with an accent ring while it is showing.
+/// Its inputs say everything it draws, and two cards with the same inputs are equal, so the sidebar redraws only the
+/// cards whose screen, active state, renaming state or presets changed. Its own screen's name and its thumbnail
+/// revision still redraw it through Observation.
+struct ScreenCard: View, Equatable {
+    let screen: Screen
+    let isActive: Bool
+    let isRenaming: Bool
+    /// The sidebar's renaming screen, which the card sets to start and end its own rename.
+    @Binding var renaming: ScreenID?
+    let revision: ThumbnailRevision
+    let model: DocumentModel
+    let controller: ScreenController
+    let userPresets: [ViewportPreset]
+    @State private var draftName = ""
+    @FocusState private var nameFieldFocused: Bool
+
+    #if DEBUG
+        /// How many times each screen's card body ran, for tests.
+        static var bodyCounts: [ScreenID: Int] = [:]
+    #endif
+
+    static func == (lhs: ScreenCard, rhs: ScreenCard) -> Bool {
+        lhs.screen === rhs.screen && lhs.isActive == rhs.isActive && lhs.isRenaming == rhs.isRenaming
+            && lhs.revision === rhs.revision && lhs.model === rhs.model && lhs.controller === rhs.controller
+            && lhs.userPresets == rhs.userPresets
+    }
+
+    var body: some View {
+        #if DEBUG
+            Self.bodyCounts[screen.id, default: 0] += 1
+        #endif
+        return HStack(spacing: 10) {
+            ScreenThumbnailView(screen: screen, revision: revision)
+            VStack(alignment: .leading, spacing: 2) {
+                if isRenaming {
+                    TextField("Name", text: $draftName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .focused($nameFieldFocused)
+                        .onSubmit { commitRename() }
+                        .onExitCommand { renaming = nil }
+                        .onAppear { nameFieldFocused = true }
+                        .onChange(of: nameFieldFocused) { _, focused in
+                            if !focused { commitRename() }
+                        }
+                } else {
+                    Text(screen.name)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(nsColor: .paper { $0.ink }))
+                        .lineLimit(1)
+                }
+                Text(screen.sidebarDetail(userPresets: userPresets))
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(Color(nsColor: .paper { $0.secondaryInk }))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .paperCard(selected: isActive)
+        .contentShape(Rectangle())
+        .onTapGesture { model.show(screen.id) }
+        .contextMenu { menu }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+    }
+
     @ViewBuilder
-    private func screenMenu(_ screen: Screen) -> some View {
+    private var menu: some View {
         let id = screen.id
         Button("Rename") {
             draftName = screen.name
@@ -146,21 +195,9 @@ struct ScreenSidebar: View {
     }
 
     private func commitRename() {
-        guard let id = renaming else { return }
+        guard renaming == screen.id else { return }
         renaming = nil
-        controller.renameScreen(id, to: draftName)
-    }
-
-    /// The sidebar icon for each screen kind.
-    static func symbol(for kind: ScreenKind) -> String {
-        switch kind {
-        case .screen: "rectangle"
-        case .modal: "rectangle.center.inset.filled"
-        case .sheet: "rectangle.bottomhalf.inset.filled"
-        case .popover: "bubble.middle.top"
-        case .menu: "filemenu.and.selection"
-        case .alert: "exclamationmark.triangle"
-        }
+        controller.renameScreen(screen.id, to: draftName)
     }
 }
 
