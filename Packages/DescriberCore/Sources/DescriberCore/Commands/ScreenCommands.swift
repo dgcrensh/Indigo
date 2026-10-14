@@ -3,6 +3,8 @@ import Foundation
 /// Adds a new, empty screen. A position inside a variant group puts it after the group.
 public struct AddScreen: Command {
     public let actionName = "New Screen"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     /// The screen to add. Created with the command so the caller knows its ID.
     public let screen: Screen
     /// Position in the sidebar, or nil for the end.
@@ -28,6 +30,8 @@ public struct AddScreen: Command {
 /// Links inside the copy keep pointing at their original targets. The copy is not added to a variant group.
 public struct DuplicateScreen: Command {
     public let actionName = "Duplicate Screen"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let source: ScreenID
     /// The copy's ID, chosen when the command is created.
     public let newID: ScreenID
@@ -54,6 +58,8 @@ public struct DuplicateScreen: Command {
 /// Moves a screen to a new position in the sidebar.
 public struct ReorderScreen: Command {
     public let actionName = "Move Screen"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screen: ScreenID
     /// The screen's position after the move.
     public let index: Int
@@ -78,6 +84,8 @@ public struct ReorderScreen: Command {
 /// one or more (spec Section 2).
 public struct DeleteScreen: Command {
     public let actionName = "Delete Screen"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screen: ScreenID
 
     public init(_ screen: ScreenID) {
@@ -104,6 +112,8 @@ public struct DeleteScreen: Command {
 /// The copy is placed after the group's last screen in the sidebar.
 public struct NewVariant: Command {
     public let actionName = "New Variant"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let source: ScreenID
     public let viewport: Viewport
     public let newID: ScreenID
@@ -143,6 +153,8 @@ public struct NewVariant: Command {
 /// are moved together in the sidebar, at the place of the first.
 public struct GroupVariants: Command {
     public let actionName = "Group Variants"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screens: [ScreenID]
     public let name: String
 
@@ -171,6 +183,8 @@ public struct GroupVariants: Command {
 /// Dissolves the variant group a screen belongs to. The screens themselves are untouched.
 public struct UngroupVariants: Command {
     public let actionName = "Ungroup Variants"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screen: ScreenID
 
     public init(containing screen: ScreenID) {
@@ -190,6 +204,8 @@ public struct UngroupVariants: Command {
 /// Puts the screens in a new sidebar order, as a drag in the sidebar does. Variant groups are kept together.
 public struct ReorderScreens: Command {
     public let actionName = "Move Screen"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     /// Every screen in the project, in the new order.
     public let order: [ScreenID]
 
@@ -214,6 +230,8 @@ public struct ReorderScreens: Command {
 /// the end of its new group in the sidebar.
 public struct JoinVariants: Command {
     public let actionName = "Make Variant"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screen: ScreenID
     public let target: ScreenID
 
@@ -254,6 +272,8 @@ public struct JoinVariants: Command {
 /// screen is dissolved.
 public struct LeaveVariantGroup: Command {
     public let actionName = "Remove from Variant Group"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screen: ScreenID
 
     public init(_ screen: ScreenID) {
@@ -278,6 +298,8 @@ public struct LeaveVariantGroup: Command {
 /// Renames the variant group a screen is in.
 public struct RenameVariantGroup: Command {
     public let actionName = "Rename Variant Group"
+    /// Changes the screen list or variant groups, which every screen file can depend on.
+    public var affectedScreens: AffectedScreens { .all }
     public let screen: ScreenID
     public let name: String
 
@@ -299,7 +321,8 @@ public struct RenameVariantGroup: Command {
 /// Commands that set one field of a screen, and queries the screen UI needs.
 public enum ScreenCommands {
     public static func rename(_ screen: ScreenID, to name: String) -> Command {
-        SetScreenValue(actionName: "Rename Screen", screen: screen, keyPath: \.name, value: name)
+        // Other screens' files name the screen in their links, and slugs depend on every name.
+        SetScreenValue(actionName: "Rename Screen", screen: screen, keyPath: \.name, value: name, affectedScreens: .all)
     }
 
     public static func setKind(_ kind: ScreenKind, of screen: ScreenID) -> Command {

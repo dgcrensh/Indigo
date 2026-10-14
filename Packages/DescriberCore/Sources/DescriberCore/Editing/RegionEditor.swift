@@ -185,7 +185,8 @@ public final class RegionEditor {
             // Setting the scrolling back wouldn't put back children it re-placed, so the layout goes back too.
             let actionName = "Change Scrolling"
             var restores: [Command] = [
-                SetRegionValue(actionName: actionName, region: region, keyPath: \.scroll, value: original.scroll)
+                SetRegionValue(
+                    actionName: actionName, region: region, keyPath: \.scroll, value: original.scroll, screen: screen)
             ]
             if let originalLayout {
                 restores.append(RestoreLayout(actionName: actionName, screen: screen, changes: originalLayout))

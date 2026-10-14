@@ -6,8 +6,33 @@ public protocol Command {
     /// The name the Undo and Redo menu items show, such as "Move Region". An inverse has the same name.
     var actionName: String { get }
 
+    /// The screens whose files the edit can change, so a save can skip the others (milestone 23). Required with no
+    /// default, so every command says which.
+    var affectedScreens: AffectedScreens { get }
+
     /// Applies the edit and returns the command that undoes it. A command that throws leaves the project unchanged.
     func apply(to project: Project) throws -> Command
+}
+
+/// The screens an edit can change the files of.
+public enum AffectedScreens: Equatable, Sendable {
+    /// Only these screens' files.
+    case screens(Set<ScreenID>)
+    /// Any screen's file, as when screens are renamed, added, removed, reordered or grouped: a screen's file names
+    /// the screens its links point at, and slugs depend on the other screens' names and order.
+    case all
+
+    public static func screen(_ id: ScreenID) -> AffectedScreens {
+        .screens([id])
+    }
+
+    /// Both sets of screens together.
+    public func union(_ other: AffectedScreens) -> AffectedScreens {
+        switch (self, other) {
+        case (.screens(let mine), .screens(let theirs)): .screens(mine.union(theirs))
+        default: .all
+        }
+    }
 }
 
 /// Why a command could not be applied.
@@ -32,6 +57,10 @@ public struct CompositeCommand: Command {
     public init(actionName: String, commands: [Command]) {
         self.actionName = actionName
         self.commands = commands
+    }
+
+    public var affectedScreens: AffectedScreens {
+        commands.reduce(.screens([])) { $0.union($1.affectedScreens) }
     }
 
     public func apply(to project: Project) throws -> Command {

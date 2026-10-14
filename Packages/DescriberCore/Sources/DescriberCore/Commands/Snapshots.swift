@@ -73,6 +73,8 @@ struct RestoreLayout: Command {
     let screen: ScreenID
     let changes: LayoutChanges
 
+    var affectedScreens: AffectedScreens { .screen(screen) }
+
     func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
         let current = changes.current(in: screen)
@@ -107,6 +109,8 @@ struct RestoreStructure: Command {
     let actionName: String
     let structure: ProjectStructure
 
+    var affectedScreens: AffectedScreens { .all }
+
     func apply(to project: Project) throws -> Command {
         let current = ProjectStructure(project: project, linksOf: structure.links.map(\.region))
         structure.restore(into: project)
@@ -114,18 +118,24 @@ struct RestoreStructure: Command {
     }
 }
 
-/// Sets one property of a region and returns the command that sets it back.
+/// Sets one property of a region and returns the command that sets it back. The region is found by ID; the screen
+/// it was found on is recorded in the inverse, and looked at first when given.
 struct SetRegionValue<Value>: Command {
     let actionName: String
     let region: RegionID
     let keyPath: ReferenceWritableKeyPath<Region, Value>
     let value: Value
+    /// The screen the region is on, when known. Until then the command can't say which screen it changes.
+    var screen: ScreenID? = nil
+
+    var affectedScreens: AffectedScreens { screen.map(AffectedScreens.screen) ?? .all }
 
     func apply(to project: Project) throws -> Command {
-        let target = try project.requireRegion(region)
+        let found = screen.flatMap { project.region(withID: region, onScreen: $0) } ?? project.region(withID: region)
+        guard let (target, screen) = found else { throw EditError.regionNotFound(region) }
         let old = target[keyPath: keyPath]
         target[keyPath: keyPath] = value
-        return SetRegionValue(actionName: actionName, region: region, keyPath: keyPath, value: old)
+        return SetRegionValue(actionName: actionName, region: region, keyPath: keyPath, value: old, screen: screen.id)
     }
 }
 
@@ -135,12 +145,26 @@ struct SetScreenValue<Value>: Command {
     let screen: ScreenID
     let keyPath: ReferenceWritableKeyPath<Screen, Value>
     let value: Value
+    /// The screen itself, or every screen for a field other screens' files show, such as the name.
+    var affectedScreens: AffectedScreens
+
+    init(
+        actionName: String, screen: ScreenID, keyPath: ReferenceWritableKeyPath<Screen, Value>, value: Value,
+        affectedScreens: AffectedScreens? = nil
+    ) {
+        self.actionName = actionName
+        self.screen = screen
+        self.keyPath = keyPath
+        self.value = value
+        self.affectedScreens = affectedScreens ?? .screen(screen)
+    }
 
     func apply(to project: Project) throws -> Command {
         let target = try project.requireScreen(screen)
         let old = target[keyPath: keyPath]
         target[keyPath: keyPath] = value
-        return SetScreenValue(actionName: actionName, screen: screen, keyPath: keyPath, value: old)
+        return SetScreenValue(
+            actionName: actionName, screen: screen, keyPath: keyPath, value: old, affectedScreens: affectedScreens)
     }
 }
 

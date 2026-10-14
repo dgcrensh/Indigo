@@ -4,7 +4,7 @@ How milestone 23 of the [v1 roadmap](../v1-roadmap.md) is built, a core mileston
 [m18-autosave-cost.md](m18-autosave-cost.md) and the command layer from [m2-commands.md](m2-commands.md). From the
 profile in `real-hardware-profile.md` in the project files (item 6). Independent of milestones 20 to 22.
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

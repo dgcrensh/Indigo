@@ -81,37 +81,51 @@ public enum ProjectPackage {
 
     /// Writes a project. Pass the package as it was last read or written as `previous` to learn which files moved
     /// away and which are unchanged. Pass the same `cache` to every write of a document to skip writing the text of
-    /// files whose content hasn't changed since the last write; the result is the same with or without it.
+    /// files whose content hasn't changed since the last write; the result is the same with or without it. With the
+    /// cache, pass the edit session's `generations` too to skip even building the files of screens no change has
+    /// touched since the last write (milestone 23).
     public static func write(
-        project: Project, previous: PackageTree = [:], cache: PackageEncodingCache? = nil
+        project: Project, previous: PackageTree = [:], cache: PackageEncodingCache? = nil,
+        generations: PackageGenerations? = nil
     ) -> WriteResult {
         let files = screenFiles(for: project)
-        var values: [(path: String, value: JSONValue)] = [
-            (manifestPath, ProjectEncoding.manifest(project, files: files))
-        ]
-        for screen in project.screens {
-            values.append((files[screen.id]!, ProjectEncoding.screen(screen, in: project)))
-        }
-        if !project.editorState.isEmpty {
-            values.append((editorStatePath, ProjectEncoding.editorState(project.editorState)))
-        }
-
         var tree: PackageTree = [:]
         var unchanged: Set<String> = []
-        for (path, value) in values {
+
+        /// Uses the previous text when the cache says `value` is what it was encoded from, else encodes it.
+        func store(_ value: JSONValue, at path: String, stamp: ScreenStamp? = nil) {
             if let cached = cache?.entries[path], let old = previous[path], cached.value.isIdentical(to: value),
+                old == cached.data
+            {
+                tree[path] = old
+                unchanged.insert(path)
+                cache?.entries[path]?.stamp = stamp
+                return
+            }
+            let data = OrderedJSONWriter.data(value)
+            cache?.entries[path] = PackageEncodingCache.Entry(value: value, data: data, stamp: stamp)
+            tree[path] = data
+            if previous[path] == data {
+                unchanged.insert(path)
+            }
+        }
+
+        store(ProjectEncoding.manifest(project, files: files), at: manifestPath)
+        for screen in project.screens {
+            let path = files[screen.id]!
+            let stamp = generations?.stamp(for: screen.id)
+            // Untouched since the write that cached it, and that write's text is still in the package.
+            if let stamp, let cached = cache?.entries[path], cached.stamp == stamp, let old = previous[path],
                 old == cached.data
             {
                 tree[path] = old
                 unchanged.insert(path)
                 continue
             }
-            let data = OrderedJSONWriter.data(value)
-            cache?.entries[path] = (value, data)
-            tree[path] = data
-            if previous[path] == data {
-                unchanged.insert(path)
-            }
+            store(ProjectEncoding.screen(screen, in: project), at: path, stamp: stamp)
+        }
+        if !project.editorState.isEmpty {
+            store(ProjectEncoding.editorState(project.editorState), at: editorStatePath)
         }
         cache?.entries = cache?.entries.filter { tree[$0.key] != nil } ?? [:]
 
@@ -137,10 +151,19 @@ public enum ProjectPackage {
 }
 
 /// What a document last wrote for each file: the value and its text. Values are compared exactly (strings by their
-/// UTF-8 bytes), so a file whose value is identical can reuse its text without writing it again. Keep one per
-/// document and replace it whenever the document's package is replaced, as when reading or reverting.
+/// UTF-8 bytes), so a file whose value is identical can reuse its text without writing it again. A screen file also
+/// keeps its screen's generations from the write, so a screen untouched since then can reuse its text without
+/// building its value. Keep one per document and replace it whenever the document's package is replaced, as when
+/// reading or reverting.
 public final class PackageEncodingCache {
-    var entries: [String: (value: JSONValue, data: Data)] = [:]
+    struct Entry {
+        var value: JSONValue
+        var data: Data
+        /// The screen's generations when `value` was last known to match it, for screen files written with them.
+        var stamp: ScreenStamp?
+    }
+
+    var entries: [String: Entry] = [:]
 
     public init() {}
 }
