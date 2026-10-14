@@ -8,7 +8,7 @@ final class DocumentWindowController: NSWindowController {
     /// How long the details panel takes to slide in or out. Nothing animates while the window is off screen.
     static let detailsAnimationDuration = 0.25
 
-    let splitViewController = NSSplitViewController()
+    let splitViewController = DocumentSplitViewController()
     let canvasController: CanvasViewController
     let detailsController: DetailsPanelController
     let screenController: ScreenController
@@ -55,6 +55,9 @@ final class DocumentWindowController: NSWindowController {
         splitViewController.addSplitViewItem(inspector)
 
         window.contentViewController = splitViewController
+        splitViewController.allowsKeybindItem = { [weak self] item in
+            self?.allowsKeybindItem(item) ?? true
+        }
         window.setContentSize(NSSize(width: 1000, height: 700))
         window.center()
         window.delegate = self
@@ -465,6 +468,15 @@ final class DocumentWindowController: NSWindowController {
         window?.firstResponder is NSText
     }
 
+    /// Whether a menu item may run as far as text editing goes. While a field is being edited, an item whose key
+    /// comes from the registry works only for the standard editing shortcuts (Undo, Redo, Copy, Paste, Select All),
+    /// whatever key it is bound to, so no canvas or tool keybind fires (spec 6.3 and 9). Other items, such as Save,
+    /// keep their own rules.
+    func allowsKeybindItem(_ item: NSMenuItem) -> Bool {
+        guard isEditingText, let keybind = MainMenu.keybind(of: item) else { return true }
+        return keybind.action.worksWhileEditingText
+    }
+
     /// Whether keys go to the canvas: it has focus, or nothing in the window does. Canvas keys without Cmd only work
     /// then, so they never take keys from the panel's fields and pop-ups or the sidebar.
     var canvasHasFocus: Bool {
@@ -486,6 +498,7 @@ extension DocumentWindowController: NSWindowDelegate {
 
 extension DocumentWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard allowsKeybindItem(menuItem) else { return false }
         let model = canvasController.model
         switch menuItem.action {
         case #selector(chooseSelectTool(_:)):
@@ -500,9 +513,9 @@ extension DocumentWindowController: NSMenuItemValidation {
             break
         case #selector(copy(_:)), #selector(duplicateSelection(_:)), #selector(bringToFront(_:)),
             #selector(sendToBack(_:)):
-            return !isEditingText && canvasController.hasSelection
+            return canvasController.hasSelection
         case #selector(paste(_:)):
-            return !isEditingText && canvasController.canPaste
+            return canvasController.canPaste
         case #selector(selectAll(_:)), #selector(toggleAllDescriptions(_:)):
             let hasRegions = model.activeScreen.map { !$0.regions.isEmpty } ?? false
             return hasRegions && (menuItem.action == #selector(selectAll(_:)) || canvasHasFocus)
@@ -533,20 +546,19 @@ extension DocumentWindowController: NSMenuItemValidation {
         case #selector(removeFromVariantGroup(_:)):
             return activeScreen.map { screenController.isInVariantGroup($0.id) } ?? false
         case #selector(goBack(_:)):
-            return !isEditingText && screenController.canGoBack
+            return screenController.canGoBack
         case #selector(goForward(_:)):
-            return !isEditingText && screenController.canGoForward
+            return screenController.canGoForward
         case #selector(showNextScreen(_:)):
-            return !isEditingText && screenController.neighbor(offset: 1) != nil
+            return screenController.neighbor(offset: 1) != nil
         case #selector(showPreviousScreen(_:)):
-            return !isEditingText && screenController.neighbor(offset: -1) != nil
+            return screenController.neighbor(offset: -1) != nil
         case #selector(followLink(_:)):
             return canvasHasFocus && canvasController.canFollowLink
         default:
             return true
         }
-        // A bare-key equivalent such as R would otherwise take the key from the text being typed.
-        return !(isEditingText && menuItem.keyEquivalentModifierMask.isDisjoint(with: [.command, .control]))
+        return true
     }
 }
 

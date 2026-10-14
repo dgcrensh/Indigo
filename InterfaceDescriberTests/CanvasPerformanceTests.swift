@@ -84,4 +84,99 @@ final class CanvasPerformanceTests: XCTestCase {
         // The first container is at (16, 16) and 340 pt wide.
         XCTAssertEqual(box.frame, CGRect(x: 32, y: 32, width: 680, height: 600))
     }
+
+    // MARK: Gestures (milestone 12)
+
+    /// A window on a document holding the 500-region stress project, with its canvas the size the timings assume.
+    @MainActor
+    private func makeStressWindow() throws -> (Document, DocumentWindowController, CanvasViewController) {
+        let document = Document()
+        document.model.replaceProject(with: .stressTest(regionCount: 500))
+        document.makeWindowControllers()
+        let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+        controller.window?.setContentSize(viewSize)
+        controller.window?.layoutIfNeeded()
+        document.undoManager?.groupsByEvent = false
+        let canvas = controller.canvasController
+        canvas.update()
+        canvas.canvasView.camera = Camera(zoom: 1)
+        XCTAssertEqual(canvas.canvasView.regionLayerCount, 500)
+        return (document, controller, canvas)
+    }
+
+    /// Presses at `start`, drags there by `delta` in 20 frames and releases, as one undo group. Returns the average
+    /// time of a drag frame in milliseconds, including redrawing anything the frame marked for display.
+    @MainActor
+    private func timeDrag(
+        _ canvas: CanvasViewController, in document: Document, from start: CGPoint, by delta: CGVector
+    ) -> Double {
+        let frames = 20
+        let end = CGPoint(x: start.x + delta.dx, y: start.y + delta.dy)
+        document.undoManager?.beginUndoGrouping()
+        canvas.canvasPressed(at: start, modifiers: [])
+        let begin = Date()
+        for frame in 1...frames {
+            let progress = Double(frame) / Double(frames)
+            canvas.canvasDragged(
+                to: CGPoint(x: start.x + delta.dx * progress, y: start.y + delta.dy * progress), optionHeld: false)
+            canvas.canvasView.layer?.displayIfNeeded()
+            for box in canvas.canvasView.regionsLayer.sublayers ?? [] {
+                for sublayer in box.sublayers ?? [] {
+                    sublayer.displayIfNeeded()
+                }
+            }
+        }
+        let milliseconds = Date().timeIntervalSince(begin) / Double(frames) * 1000
+        canvas.canvasReleased(at: end, optionHeld: false)
+        document.undoManager?.endUndoGrouping()
+        canvas.update()
+        return milliseconds
+    }
+
+    @MainActor
+    func testGesturesOnTheStressProjectStayWithinBudget() throws {
+        let (document, controller, canvas) = try makeStressWindow()
+        defer { controller.close() }
+        let session = document.model.session
+        let screen = try XCTUnwrap(document.model.activeScreen)
+        let container = try XCTUnwrap(screen.regions.first)
+        let item = try XCTUnwrap(container.children.first?.children.first)
+        XCTAssertEqual(item.frame, Frame(x: 40, y: 40, w: 92, h: 32))
+        var times: [(String, Double)] = []
+
+        // Item 1.1.1, dragged across the screen.
+        let moveOne = timeDrag(canvas, in: document, from: CGPoint(x: 86, y: 56), by: CGVector(dx: 400, dy: 240))
+        XCTAssertEqual(session.undoDepth, 1)
+        XCTAssertEqual(session.undoActionName, "Move Region")
+        times.append(("move one region", moveOne))
+
+        // Every region, dragged by container 1's bottom margin.
+        canvas.selectAll()
+        XCTAssertEqual(document.model.selection.count, 500)
+        let moveAll = timeDrag(canvas, in: document, from: CGPoint(x: 24, y: 310), by: CGVector(dx: 160, dy: 96))
+        XCTAssertEqual(session.undoDepth, 2)
+        XCTAssertGreaterThan(container.frame.x, 16, "the whole selection moved")
+        times.append(("move all 500", moveAll))
+
+        // Container 1, its children inside, by its bottom-right handle.
+        document.model.selection = [container.id]
+        canvas.update()
+        let corner = CGPoint(x: container.frame.maxX, y: container.frame.maxY)
+        let resize = timeDrag(canvas, in: document, from: corner, by: CGVector(dx: 200, dy: 120))
+        XCTAssertEqual(session.undoDepth, 3)
+        XCTAssertEqual(session.undoActionName, "Resize Region")
+        times.append(("resize a container", resize))
+
+        // A large region drawn over most of the screen.
+        canvas.choose(.region)
+        let draw = timeDrag(canvas, in: document, from: CGPoint(x: 8, y: 8), by: CGVector(dx: 1200, dy: 800))
+        XCTAssertNotNil(document.model.details, "the drawn region opened in the panel")
+        document.model.closeDetails()
+        times.append(("draw a region", draw))
+
+        for (name, milliseconds) in times {
+            print(String(format: "Canvas, 500 regions, %@: %.2f ms per drag frame", name, milliseconds))
+            XCTAssertLessThan(milliseconds, 16, name)
+        }
+    }
 }

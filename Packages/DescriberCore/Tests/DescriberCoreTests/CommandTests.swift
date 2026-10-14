@@ -29,12 +29,14 @@ final class CommandTests: XCTestCase {
 
     // MARK: Edit session
 
-    func testEveryRegionCommandUndoesAndRedoesToTheSameBytes() throws {
+    /// One of every region command, on the example project. The undo audit below checks this list and
+    /// `screenCommands` cover every command type.
+    private static var regionCommands: [Command] {
         let screen = AcmeExample.settings
         let list = RegionID("9be4bcfc-49b6-4a08-b2e6-cc3ababced20")
         let about = RegionID("6bf46c69-7d2c-4f82-aeea-cbe226e87555")
         let notifications = RegionID("830e07bc-1e39-4f10-92bd-4acefaecbd38")
-        let commands: [Command] = [
+        return [
             CreateRegion(screen: screen, frame: Frame(x: 20, y: 300, w: 100, h: 40), title: "New"),
             MoveRegions(screen: screen, regions: [list], dx: 10, dy: 20),
             MoveRegions(screen: screen, regions: [notifications, about], dx: 0, dy: -8),
@@ -48,14 +50,25 @@ final class CommandTests: XCTestCase {
             RegionCommands.setKind(.container, of: list),
             RegionCommands.setLinks([Link(screen: AcmeExample.login, trigger: "swipe")], of: list),
             RegionCommands.setScroll(nil, of: list),
+            RegionCommands.setScroll(Scroll(axis: .vertical, contentWidth: 100, contentHeight: 900), of: about),
+            ReorderRegions(screen: screen, regions: [notifications, about], to: .back),
+            CompositeCommand(
+                actionName: "Move and Rename",
+                commands: [
+                    MoveRegions(screen: screen, regions: [about], dx: 4, dy: 4),
+                    RegionCommands.setTitle("About Acme", of: about),
+                ]),
         ]
-        for command in commands {
+    }
+
+    func testEveryRegionCommandUndoesAndRedoesToTheSameBytes() throws {
+        for command in Self.regionCommands {
             try assertUndoable(command, on: AcmeExample.make())
         }
     }
 
-    func testEveryScreenCommandUndoesAndRedoesToTheSameBytes() throws {
-        let commands: [Command] = [
+    private static var screenCommands: [Command] {
+        [
             AddScreen(name: "Onboarding", viewport: Viewport(width: 393, height: 852), at: 1),
             DuplicateScreen(AcmeExample.settings),
             ReorderScreen(AcmeExample.accountMenu, to: 0),
@@ -77,9 +90,57 @@ final class CommandTests: XCTestCase {
             LeaveVariantGroup(AcmeExample.loginDesktop),
             RenameVariantGroup(containing: AcmeExample.login, to: "Sign in"),
         ]
-        for command in commands {
+    }
+
+    func testEveryScreenCommandUndoesAndRedoesToTheSameBytes() throws {
+        for command in Self.screenCommands {
             try assertUndoable(command, on: AcmeExample.make())
         }
+    }
+
+    /// The undo audit (milestone 12): every type that conforms to `Command` in the core's sources is applied by the
+    /// round-trip tests above, directly or as the inverse one of them returns. A new command fails here until it has
+    /// a round trip.
+    func testEveryCommandTypeHasAnUndoTest() throws {
+        var tested: Set<String> = []
+        func collect(_ command: Command) {
+            tested.insert(Self.typeName(of: command))
+            if let composite = command as? CompositeCommand {
+                composite.commands.forEach(collect)
+            }
+        }
+        for command in Self.regionCommands + Self.screenCommands {
+            collect(command)
+            collect(try command.apply(to: AcmeExample.make()))
+        }
+        let declared = try Self.declaredCommandTypes()
+        XCTAssertGreaterThan(declared.count, 20, "the source scan found the commands")
+        XCTAssertEqual(declared.subtracting(tested), [], "command types without an undo round trip")
+    }
+
+    /// A command's type name without generic parameters, such as `SetRegionValue`.
+    private static func typeName(of command: Command) -> String {
+        let name = String(describing: type(of: command))
+        return name.firstIndex(of: "<").map { String(name[..<$0]) } ?? name
+    }
+
+    /// The names of the types the core's sources declare as conforming to `Command`.
+    private static func declaredCommandTypes() throws -> Set<String> {
+        let sources = Fixtures.repositoryRoot.appendingPathComponent("Packages/DescriberCore/Sources/DescriberCore")
+        let pattern = try NSRegularExpression(
+            pattern: #"\b(?:struct|class|enum)\s+(\w+)(?:<[^>]*>)?\s*:[^{]*\bCommand\b"#)
+        var names: Set<String> = []
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        while let file = files?.nextObject() as? URL {
+            guard file.pathExtension == "swift" else { continue }
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                if let range = Range(match.range(at: 1), in: text) {
+                    names.insert(String(text[range]))
+                }
+            }
+        }
+        return names
     }
 
     func testPerformingANewCommandClearsRedo() throws {
