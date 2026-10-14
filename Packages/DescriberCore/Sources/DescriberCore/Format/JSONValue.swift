@@ -51,4 +51,32 @@ public enum JSONValue: Hashable, Sendable {
             hasher.combine(6)
         }
     }
+
+    /// Whether the two values write to the same text. Stricter than `==`, which treats canonically equivalent
+    /// strings such as a precomposed and a decomposed "é" as equal although their bytes differ.
+    func isIdentical(to other: JSONValue) -> Bool {
+        switch (self, other) {
+        case (.object(let a), .object(let b)):
+            guard a.count == b.count else { return false }
+            return zip(a, b).allSatisfy { Self.sameBytes($0.key, $1.key) && $0.value.isIdentical(to: $1.value) }
+        case (.array(let a), .array(let b)):
+            guard a.count == b.count else { return false }
+            return zip(a, b).allSatisfy { $0.isIdentical(to: $1) }
+        case (.string(let a), .string(let b)): return Self.sameBytes(a, b)
+        case (.int(let a), .int(let b)): return a == b
+        case (.double(let a), .double(let b)): return a.bitPattern == b.bitPattern
+        case (.bool(let a), .bool(let b)): return a == b
+        case (.null, .null): return true
+        default: return false
+        }
+    }
+
+    private static func sameBytes(_ a: String, _ b: String) -> Bool {
+        guard a.utf8.count == b.utf8.count else { return false }
+        var a = a
+        var b = b
+        return a.withUTF8 { a in
+            b.withUTF8 { b in a.count == 0 || memcmp(a.baseAddress!, b.baseAddress!, a.count) == 0 }
+        }
+    }
 }

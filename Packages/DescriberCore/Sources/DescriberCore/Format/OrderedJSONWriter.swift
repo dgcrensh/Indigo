@@ -5,59 +5,84 @@ import Foundation
 /// Key order is exactly the order in each `.object`.
 public enum OrderedJSONWriter {
     public static func data(_ value: JSONValue) -> Data {
-        Data(string(value).utf8)
+        Data(bytes(value))
     }
 
     public static func string(_ value: JSONValue) -> String {
-        var output = ""
+        String(decoding: bytes(value), as: UTF8.self)
+    }
+
+    /// The text as UTF-8, written into one buffer.
+    static func bytes(_ value: JSONValue) -> [UInt8] {
+        var output: [UInt8] = []
+        output.reserveCapacity(16 * 1024)
         write(value, indent: 0, to: &output)
-        output += "\n"
+        output.append(newline)
         return output
     }
 
-    private static func write(_ value: JSONValue, indent: Int, to output: inout String) {
+    private static let newline = UInt8(ascii: "\n")
+    private static let quote = UInt8(ascii: "\"")
+    private static let backslash = UInt8(ascii: "\\")
+
+    /// Indents by level, built once; deeper levels are padded on the fly.
+    private static let indents: [[UInt8]] = (0..<32).map { [UInt8](repeating: UInt8(ascii: " "), count: $0 * 2) }
+
+    private static func write(_ value: JSONValue, indent: Int, to output: inout [UInt8]) {
         switch value {
         case .object(let pairs):
             guard !pairs.isEmpty else {
-                output += "{}"
+                output.append(contentsOf: "{}".utf8)
                 return
             }
-            output += "{\n"
+            output.append(contentsOf: "{\n".utf8)
             for (index, pair) in pairs.enumerated() {
-                output += padding(indent + 1)
-                output += quoted(pair.key)
-                output += ": "
+                pad(indent + 1, to: &output)
+                writeQuoted(pair.key, to: &output)
+                output.append(contentsOf: ": ".utf8)
                 write(pair.value, indent: indent + 1, to: &output)
-                output += index < pairs.count - 1 ? ",\n" : "\n"
+                if index < pairs.count - 1 {
+                    output.append(UInt8(ascii: ","))
+                }
+                output.append(newline)
             }
-            output += padding(indent) + "}"
+            pad(indent, to: &output)
+            output.append(UInt8(ascii: "}"))
         case .array(let values):
             guard !values.isEmpty else {
-                output += "[]"
+                output.append(contentsOf: "[]".utf8)
                 return
             }
-            output += "[\n"
+            output.append(contentsOf: "[\n".utf8)
             for (index, element) in values.enumerated() {
-                output += padding(indent + 1)
+                pad(indent + 1, to: &output)
                 write(element, indent: indent + 1, to: &output)
-                output += index < values.count - 1 ? ",\n" : "\n"
+                if index < values.count - 1 {
+                    output.append(UInt8(ascii: ","))
+                }
+                output.append(newline)
             }
-            output += padding(indent) + "]"
+            pad(indent, to: &output)
+            output.append(UInt8(ascii: "]"))
         case .string(let string):
-            output += quoted(string)
+            writeQuoted(string, to: &output)
         case .int(let number):
-            output += String(number)
+            output.append(contentsOf: String(number).utf8)
         case .double(let number):
-            output += format(number)
+            output.append(contentsOf: format(number).utf8)
         case .bool(let flag):
-            output += flag ? "true" : "false"
+            output.append(contentsOf: (flag ? "true" : "false").utf8)
         case .null:
-            output += "null"
+            output.append(contentsOf: "null".utf8)
         }
     }
 
-    private static func padding(_ level: Int) -> String {
-        String(repeating: "  ", count: level)
+    private static func pad(_ level: Int, to output: inout [UInt8]) {
+        if level < indents.count {
+            output.append(contentsOf: indents[level])
+        } else {
+            output.append(contentsOf: repeatElement(UInt8(ascii: " "), count: level * 2))
+        }
     }
 
     /// Doubles with no fractional part are written as integers; others use Swift's shortest round-tripping form.
@@ -73,22 +98,48 @@ public enum OrderedJSONWriter {
     /// Escapes a string the way `JSONSerialization` does with `.withoutEscapingSlashes`: quote, backslash, and
     /// control characters are escaped; everything else, including non-ASCII, is written as is.
     static func quoted(_ string: String) -> String {
-        var result = "\""
-        for scalar in string.unicodeScalars {
-            switch scalar {
-            case "\"": result += "\\\""
-            case "\\": result += "\\\\"
-            case "\n": result += "\\n"
-            case "\r": result += "\\r"
-            case "\t": result += "\\t"
-            case "\u{08}": result += "\\b"
-            case "\u{0C}": result += "\\f"
-            case let control where control.value < 0x20:
-                result += String(format: "\\u%04x", control.value)
-            default:
-                result.unicodeScalars.append(scalar)
+        var output: [UInt8] = []
+        writeQuoted(string, to: &output)
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    private static func writeQuoted(_ string: String, to output: inout [UInt8]) {
+        output.append(quote)
+        var string = string
+        string.withUTF8 { bytes in
+            if !bytes.contains(where: needsEscaping) {
+                output.append(contentsOf: bytes)
+            } else {
+                for byte in bytes {
+                    appendEscaped(byte, to: &output)
+                }
             }
         }
-        return result + "\""
+        output.append(quote)
     }
+
+    /// Only ASCII bytes are ever escaped, so non-ASCII UTF-8 sequences pass through byte by byte unchanged.
+    private static func needsEscaping(_ byte: UInt8) -> Bool {
+        byte < 0x20 || byte == quote || byte == backslash
+    }
+
+    private static func appendEscaped(_ byte: UInt8, to output: inout [UInt8]) {
+        switch byte {
+        case quote: output.append(contentsOf: "\\\"".utf8)
+        case backslash: output.append(contentsOf: "\\\\".utf8)
+        case newline: output.append(contentsOf: "\\n".utf8)
+        case UInt8(ascii: "\r"): output.append(contentsOf: "\\r".utf8)
+        case UInt8(ascii: "\t"): output.append(contentsOf: "\\t".utf8)
+        case 0x08: output.append(contentsOf: "\\b".utf8)
+        case 0x0C: output.append(contentsOf: "\\f".utf8)
+        case let control where control < 0x20:
+            output.append(contentsOf: "\\u00".utf8)
+            output.append(hexDigits[Int(control >> 4)])
+            output.append(hexDigits[Int(control & 0x0F)])
+        default:
+            output.append(byte)
+        }
+    }
+
+    private static let hexDigits = Array("0123456789abcdef".utf8)
 }
