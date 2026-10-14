@@ -30,6 +30,8 @@ final class CanvasViewController: NSViewController {
     private(set) var isFitted = false
     /// The press, drag and release in progress.
     private var gesture: CanvasGesture?
+    /// The part of a scroll smaller than a point, kept for the next scroll event of the same region.
+    private var scrollRemainder: (region: RegionID, x: Double, y: Double)?
     private var gridPopover: NSPopover?
     /// The camera, and whether it was fitted, from before the details panel opened, to go back to when it closes.
     private var cameraBeforeDetails: (camera: Camera, isFitted: Bool)?
@@ -104,6 +106,7 @@ final class CanvasViewController: NSViewController {
     /// Rebuilds the region layers only when the project changed.
     func update() {
         let screen = model.activeScreen
+        canvasView.scrollOffsets = screen.map(scrollOffsets(for:)) ?? [:]
         canvasView.screen = screen
         let project = ObjectIdentifier(model.project)
         let screenChanged = screen?.id != shownScreenID || project != shownProject
@@ -147,6 +150,16 @@ final class CanvasViewController: NSViewController {
 
     func gridSize(for screen: Screen) -> Int {
         model.project.editorState.screens[screen.id]?.gridSize ?? Snapping.defaultGridSize
+    }
+
+    /// How far each scrolling region on `screen` is scrolled, from its editor state.
+    func scrollOffsets(for screen: Screen) -> [RegionID: ScrollOffset] {
+        model.project.editorState.screens[screen.id]?.scrollOffsets ?? [:]
+    }
+
+    /// Where `screen`'s regions are drawn at their scroll positions.
+    private func scrollLayout(for screen: Screen) -> ScrollLayout {
+        ScrollLayout(screen: screen, offsets: scrollOffsets(for: screen))
     }
 
     /// The saved camera, or the viewport fitted into the canvas when there is none.
@@ -223,7 +236,7 @@ final class CanvasViewController: NSViewController {
     /// Animates the canvas to fit `region` in a canvas `canvasWidth` wide, remembering the camera from before the
     /// panel opened. The fitted camera isn't saved as the user's.
     func fitForDetails(_ region: RegionID, canvasWidth: CGFloat) {
-        guard let screen = canvasView.screen, let frame = RegionIndex(screen: screen).region(region)?.frame else {
+        guard let screen = canvasView.screen, let frame = scrollLayout(for: screen).drawnFrame(of: region) else {
             return
         }
         prepareForDetails()
@@ -487,7 +500,8 @@ final class CanvasViewController: NSViewController {
         model.closeDetails()
         guard let screen = model.activeScreen else { return }
         let command = clipboard.paste(
-            onto: screen, in: model.project, grid: gridSize(for: screen), actionName: actionName)
+            onto: screen, in: model.project, grid: gridSize(for: screen), actionName: actionName,
+            scrollOffsets: scrollOffsets(for: screen))
         if apply(command) {
             setSelection(command.pasted.map(\.id))
         }
@@ -501,7 +515,10 @@ final class CanvasViewController: NSViewController {
         else { return }
         let selection = currentSelection
         guard !selection.isEmpty else { return }
-        apply(MoveRegions(screen: screen.id, regions: selection, dx: delta.dx, dy: delta.dy))
+        apply(
+            MoveRegions(
+                screen: screen.id, regions: selection, dx: delta.dx, dy: delta.dy,
+                scrollOffsets: scrollOffsets(for: screen)))
     }
 
     /// Brings the selection to the front or sends it to the back of its siblings.
@@ -548,7 +565,8 @@ final class CanvasViewController: NSViewController {
             return
         }
         model.closeDetails()
-        let anchor = canvasView.camera.viewPoint(fromScreen: CGPoint(x: region.frame.x, y: region.frame.maxY))
+        let frame = model.activeScreen.flatMap { scrollLayout(for: $0).drawnFrame(of: region.id) } ?? region.frame
+        let anchor = canvasView.camera.viewPoint(fromScreen: CGPoint(x: frame.x, y: frame.maxY))
         followLinks?(region.id, anchor)
     }
 
@@ -591,7 +609,8 @@ extension CanvasViewController: CanvasInteraction {
             selection: model.selection,
             snappingEnabled: model.snappingEnabled,
             gridSize: gridSize(for: screen),
-            zoom: canvasView.camera.zoom
+            zoom: canvasView.camera.zoom,
+            scrollOffsets: scrollOffsets(for: screen)
         )
         gesture = CanvasGesture(pressAt: point, modifiers: modifiers, clickCount: clickCount, context: context)
         showGesture()
@@ -637,6 +656,37 @@ extension CanvasViewController: CanvasInteraction {
         case nil:
             break
         }
+    }
+
+    func canvasScrollTarget(at point: CGPoint) -> RegionID? {
+        guard let screen = model.activeScreen else { return nil }
+        return scrollLayout(for: screen).scrollTarget(at: point, among: currentSelection)
+    }
+
+    /// Scrolls `region`'s content so it follows the fingers, and keeps the offset in the screen's editor state. Like
+    /// zoom, scrolling isn't an edit: it isn't undoable and the next save writes it.
+    func canvasScroll(_ region: RegionID, byViewDX dx: Double, dy: Double) {
+        guard let screen = model.activeScreen, screen.id == shownScreenID, var state = shownScreenState else { return }
+        let zoom = canvasView.camera.zoom
+        var pending: (region: RegionID, x: Double, y: Double) = (region, 0, 0)
+        if let remainder = scrollRemainder, remainder.region == region {
+            pending = remainder
+        }
+        pending.x -= dx / zoom
+        pending.y -= dy / zoom
+        let stepX = Int(pending.x.rounded(.towardZero))
+        let stepY = Int(pending.y.rounded(.towardZero))
+        pending.x -= Double(stepX)
+        pending.y -= Double(stepY)
+        scrollRemainder = pending
+        guard stepX != 0 || stepY != 0,
+            let offset = ScrollLayout(screen: screen, offsets: state.scrollOffsets).scrolled(
+                region, byDX: stepX, dy: stepY)
+        else { return }
+        state.scrollOffsets[region] = offset == .zero ? nil : offset
+        model.project.editorState.screens[screen.id] = state
+        isFitted = false
+        canvasView.scrollOffsets = state.scrollOffsets
     }
 
     func canvasKeyDown(_ combo: KeyCombo) -> Bool {

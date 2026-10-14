@@ -12,12 +12,17 @@ protocol CanvasInteraction: AnyObject {
     func canvasOptionChanged(optionHeld: Bool)
     /// Returns whether the key was handled.
     func canvasKeyDown(_ combo: KeyCombo) -> Bool
+    /// The region a two-finger scroll starting at `point` scrolls, or nil to pan the canvas (spec Section 5).
+    func canvasScrollTarget(at point: CGPoint) -> RegionID?
+    /// Scrolls `region`'s content by a scroll event's deltas, in view points.
+    func canvasScroll(_ region: RegionID, byViewDX dx: Double, dy: Double)
 }
 
 /// The canvas. Each region is its own Core Animation layer, so panning moves one layer and zooming only resizes
 /// layers; the milestone 4 spike found redrawing 500 regions with Core Graphics on every frame too slow. Turns
-/// two-finger scrolls and pinches into camera changes, and passes clicks, drags and keys to its `interaction`. Shows
-/// the selection, resize handles, and what a gesture in progress would do.
+/// two-finger scrolls and pinches into camera changes, and passes clicks, drags, keys and scrolls over scrollable
+/// regions to its `interaction`. Shows the selection, resize handles, and what a gesture in progress would do.
+/// Regions are drawn where their scroll positions put them (`ScrollLayout`).
 final class CanvasView: NSView {
     /// The screen to draw. Call `reload()` after it changes in place.
     var screen: Screen? {
@@ -79,6 +84,13 @@ final class CanvasView: NSView {
             }
         }
     }
+    /// How far each scrolling region is scrolled, from the screen's editor state.
+    var scrollOffsets: [RegionID: ScrollOffset] = [:] {
+        didSet {
+            guard scrollOffsets != oldValue else { return }
+            withoutAnimation(applyScroll)
+        }
+    }
     /// What the gesture in progress would do.
     var preview: CanvasGesture.Preview = .none {
         didSet {
@@ -100,12 +112,20 @@ final class CanvasView: NSView {
     private let newRegionLayer = CALayer()
     private let marqueeLayer = CALayer()
     private let handleLayers = ResizeHandle.allCases.map { _ in CALayer() }
+    /// A dashed outline of each selected scrolling region's whole content area, at its scroll position.
+    private let contentOutline = CAShapeLayer()
     private let emptyLabel = CATextLayer()
     private var regionLayers: [RegionID: RegionLayers] = [:]
     /// The screen's regions by ID, as of the last reload.
     private var regions: [RegionID: Region] = [:]
+    /// Where the screen's regions are drawn, as of the last reload or scroll.
+    private(set) var scrollLayout: ScrollLayout?
+    /// The frame and clip each region's layers were last given, so a scroll only updates the layers that move.
+    private var drawnRegions: [RegionID: DrawnRegion] = [:]
     /// The regions drawn at a previewed frame.
     private var previewedRegions: Set<RegionID> = []
+    /// Where the trackpad scroll in progress goes, chosen when it begins and kept through its momentum.
+    private var scrollRoute: ScrollRoute?
     /// Whether a press started a gesture that hasn't been released yet.
     private var isTrackingGesture = false
     private let titleWidths = TitleWidths()
@@ -144,6 +164,11 @@ final class CanvasView: NSView {
         viewportOutline.fillColor = nil
         viewportOutline.lineWidth = 1
         viewportOutline.lineDashPattern = [4, 3]
+        contentOutline.anchorPoint = .zero
+        contentOutline.fillColor = nil
+        contentOutline.lineWidth = 1
+        contentOutline.lineDashPattern = [4, 3]
+        overlayLayer.insertSublayer(contentOutline, at: 0)
         boundsLayer.borderWidth = 1
         boundsLayer.addSublayer(viewportOutline)
         gridLayer.fillColor = nil
@@ -213,6 +238,7 @@ final class CanvasView: NSView {
             handle.backgroundColor = colors.handleFill
             handle.borderColor = colors.selection
         }
+        contentOutline.strokeColor = colors.selection
     }
 
     // MARK: Content
@@ -226,19 +252,28 @@ final class CanvasView: NSView {
             guard let screen else {
                 regionLayers = [:]
                 regions = [:]
+                scrollLayout = nil
+                drawnRegions = [:]
                 regionsLayer.sublayers = nil
                 layoutGrid()
                 layoutOverlay()
                 return
             }
             let bounds = screen.canvasBounds
+            let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+            self.scrollLayout = layout
+            drawnRegions = [:]
             let selected = Set(selection)
             var kept: [RegionID: RegionLayers] = [:]
             var regions: [RegionID: Region] = [:]
             var boxes: [CALayer] = []
             for region in screen.allRegions {
                 let layers = regionLayers[region.id] ?? RegionLayers()
-                layers.update(from: region, bounds: bounds, titleWidths: titleWidths)
+                let drawn = DrawnRegion(layout, region.id)
+                layers.update(from: region, drawnFrame: drawn.frame, bounds: bounds, titleWidths: titleWidths)
+                layers.setClip(drawn.clip)
+                layers.setScrollIndicators(layout.indicators(of: region.id))
+                drawnRegions[region.id] = drawn
                 layers.apply(colors, scale: scale)
                 layers.isSelected = selected.contains(region.id)
                 layers.showsDescription = visibleDescriptions.contains(region.id)
@@ -260,6 +295,49 @@ final class CanvasView: NSView {
     /// The number of regions with a layer.
     var regionLayerCount: Int {
         regionLayers.count
+    }
+
+    /// Draws every region where the new scroll positions put it, updating only the layers that move.
+    private func applyScroll() {
+        guard let screen else { return }
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        self.scrollLayout = layout
+        let bounds = screen.canvasBounds
+        for (id, layers) in regionLayers {
+            let drawn = DrawnRegion(layout, id)
+            let isScrolling = regions[id]?.scroll != nil
+            guard drawn != drawnRegions[id] || isScrolling else { continue }
+            drawnRegions[id] = drawn
+            if !previewedRegions.contains(id) {
+                layers.setFrame(drawn.frame, bounds: bounds)
+                layers.setClip(drawn.clip)
+            }
+            if isScrolling {
+                layers.setScrollIndicators(layout.indicators(of: id))
+            }
+            layers.layout(zoom: camera.zoom)
+        }
+        layoutOverlay()
+    }
+
+    /// Where `id` is drawn, for tests.
+    func drawnFrame(of id: RegionID) -> Frame? {
+        regionLayers[id]?.drawnFrame
+    }
+
+    /// Whether `id` is scrolled out of view, for tests.
+    func isClippedAway(_ id: RegionID) -> Bool {
+        regionLayers[id]?.isClippedAway ?? false
+    }
+
+    /// How many scroll indicators `id` draws, for tests.
+    func scrollIndicatorCount(of id: RegionID) -> Int {
+        regionLayers[id]?.scrollIndicatorCount ?? 0
+    }
+
+    /// Whether the dashed content outline is showing, for tests.
+    var showsContentOutline: Bool {
+        !contentOutline.isHidden
     }
 
     /// Sizes everything for the camera's zoom, then positions it.
@@ -318,6 +396,7 @@ final class CanvasView: NSView {
             layers.isSelected = selected.contains(id)
         }
         layoutHandles()
+        layoutContentOutline()
     }
 
     private func applyPreview() {
@@ -329,18 +408,21 @@ final class CanvasView: NSView {
         layoutOverlay()
     }
 
-    /// Draws the regions in `frames` at those frames, and every other region that had a previewed frame at its own.
+    /// Draws the regions in `frames` (drawn frames) at those frames, and every other region that had a previewed
+    /// frame where it is drawn.
     private func showPreviewFrames(_ frames: [RegionID: Frame]) {
-        guard let screen else { return }
+        guard let screen, let layout = scrollLayout else { return }
         let bounds = screen.canvasBounds
         for id in previewedRegions where frames[id] == nil {
-            guard let region = regions[id], let layers = regionLayers[id] else { continue }
-            layers.setFrame(region.frame, bounds: bounds)
+            guard let layers = regionLayers[id], let drawn = drawnRegions[id] else { continue }
+            layers.setFrame(drawn.frame, bounds: bounds)
+            layers.setClip(drawn.clip)
             layers.layout(zoom: camera.zoom)
         }
-        for (id, frame) in frames {
-            guard let layers = regionLayers[id] else { continue }
-            layers.setFrame(frame, bounds: bounds)
+        for id in frames.keys {
+            guard let layers = regionLayers[id], let drawn = layout.drawn(id, previewing: frames) else { continue }
+            layers.setFrame(drawn.frame, bounds: bounds)
+            layers.setClip(drawn.clip)
             layers.layout(zoom: camera.zoom)
         }
         previewedRegions = Set(frames.keys)
@@ -364,6 +446,20 @@ final class CanvasView: NSView {
             marqueeLayer.isHidden = true
         }
         layoutHandles()
+        layoutContentOutline()
+    }
+
+    /// Outlines the content area of each selected scrolling region, except while a gesture moves or resizes regions.
+    private func layoutContentOutline() {
+        let path = CGMutablePath()
+        if let layout = scrollLayout, case .none = preview {
+            for id in selection where regions[id]?.scroll != nil {
+                guard layout.visibleFrame(of: id) != nil, let area = layout.drawnContentArea(of: id) else { continue }
+                path.addRect(RegionLayers.zoomed(area, camera.zoom))
+            }
+        }
+        contentOutline.isHidden = path.isEmpty
+        contentOutline.path = path.isEmpty ? nil : path
     }
 
     /// The frame the handles go around: the single selected region's, while the Select tool is active.
@@ -374,7 +470,7 @@ final class CanvasView: NSView {
         if case .frames(let frames) = preview, let frame = frames[id] {
             return frame
         }
-        return region.frame
+        return drawnRegions[id]?.frame ?? region.frame
     }
 
     /// The handles' side, in view points, at every zoom.
@@ -427,6 +523,13 @@ final class CanvasView: NSView {
 
     // MARK: Gestures
 
+    private enum ScrollRoute {
+        case canvas
+        case region(RegionID)
+    }
+
+    /// Two-finger scroll over a selected scrollable region scrolls it; anywhere else it pans (spec Section 5). A
+    /// trackpad scroll keeps the target it began with through its momentum; each mouse wheel step chooses again.
     override func scrollWheel(with event: NSEvent) {
         guard screen != nil else {
             super.scrollWheel(with: event)
@@ -434,7 +537,27 @@ final class CanvasView: NSView {
         }
         // A mouse wheel reports lines rather than points.
         let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
-        change(to: camera.panned(byViewDX: event.scrollingDeltaX * scale, dy: event.scrollingDeltaY * scale))
+        let begins = event.phase == .began || (event.phase.isEmpty && event.momentumPhase.isEmpty)
+        if begins || scrollRoute == nil {
+            scrollRoute = interaction?.canvasScrollTarget(at: screenPoint(of: event)).map(ScrollRoute.region) ?? .canvas
+        }
+        scroll(byViewDX: event.scrollingDeltaX * scale, dy: event.scrollingDeltaY * scale)
+    }
+
+    /// Scrolls the region the current scroll goes to, or pans.
+    private func scroll(byViewDX dx: Double, dy: Double) {
+        if case .region(let region) = scrollRoute {
+            interaction?.canvasScroll(region, byViewDX: dx, dy: dy)
+        } else {
+            change(to: camera.panned(byViewDX: dx, dy: dy))
+        }
+    }
+
+    /// A scroll beginning at `point`, in screen points, by `dx`, `dy` view points, as a trackpad gesture's first
+    /// event does. For tests.
+    func simulateScroll(at point: CGPoint, dx: Double, dy: Double) {
+        scrollRoute = interaction?.canvasScrollTarget(at: point).map(ScrollRoute.region) ?? .canvas
+        scroll(byViewDX: dx, dy: dy)
     }
 
     override func magnify(with event: NSEvent) {
@@ -541,5 +664,16 @@ final class CanvasView: NSView {
     func change(to newCamera: Camera) {
         camera = newCamera
         onCameraChange?(newCamera)
+    }
+}
+
+/// Where a region's layers draw it: its drawn frame and its clip.
+private struct DrawnRegion: Equatable {
+    var frame: Frame
+    var clip: Frame?
+
+    init(_ layout: ScrollLayout, _ id: RegionID) {
+        frame = layout.drawnFrame(of: id) ?? Frame(x: 0, y: 0, w: 0, h: 0)
+        clip = layout.clip(of: id)
     }
 }

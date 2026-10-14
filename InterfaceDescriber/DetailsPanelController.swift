@@ -319,10 +319,17 @@ final class DetailsPanelController: NSViewController {
         editor.flatMap { model.project.region(withID: $0.region)?.region.frame }
     }
 
+    /// The scroll positions on the open region's screen, so children that changing the scrolling re-places land where
+    /// they are drawn.
+    private var scrollOffsets: [RegionID: ScrollOffset] {
+        editor.flatMap { model.project.editorState.screens[$0.screen]?.scrollOffsets } ?? [:]
+    }
+
     @objc func scrollsChanged(_ sender: Any?) {
         guard let frame = regionFrame else { return }
         let scroll = scrollsCheckbox.state == .on ? Scroll.defaultFor(frame) : nil
-        edit { try $0.setScroll(scroll) }
+        let offsets = scrollOffsets
+        edit { try $0.setScroll(scroll, scrollOffsets: offsets) }
         loadScroll()
     }
 
@@ -334,7 +341,8 @@ final class DetailsPanelController: NSViewController {
         let width = Int(contentWidthField.stringValue.trimmingCharacters(in: .whitespaces)) ?? current.contentWidth
         let height = Int(contentHeightField.stringValue.trimmingCharacters(in: .whitespaces)) ?? current.contentHeight
         let scroll = Scroll(axis: axis, contentWidth: width, contentHeight: height).clamped(to: frame)
-        edit { try $0.setScroll(scroll) }
+        let offsets = scrollOffsets
+        edit { try $0.setScroll(scroll, scrollOffsets: offsets) }
         loadScroll()
     }
 

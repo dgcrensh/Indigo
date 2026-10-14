@@ -49,30 +49,43 @@ public struct RegionClipboard {
     }
 
     /// The command that pastes copies of the regions onto `screen`, with new IDs (`PasteRegions` makes them).
-    /// Links to screens `project` doesn't have, as when pasting from another document, are dropped. While a copy
-    /// would land exactly on a region with the same frame, as when pasting onto the screen the regions came from or
-    /// duplicating, all copies move one `grid` step right and down, so they show beside what is there.
-    public func paste(onto screen: Screen, in project: Project, grid: Int, actionName: String = "Paste")
-        -> PasteRegions
-    {
+    /// Links to screens `project` doesn't have, as when pasting from another document, are dropped. Copies of regions
+    /// that are on `screen` start where those regions are drawn at the screen's scroll positions, `scrollOffsets`.
+    /// While a copy would land exactly on a region drawn with the same frame, as when pasting onto the screen the
+    /// regions came from or duplicating, all copies move one `grid` step right and down, so they show beside what is
+    /// there.
+    public func paste(
+        onto screen: Screen, in project: Project, grid: Int, actionName: String = "Paste",
+        scrollOffsets: [RegionID: ScrollOffset] = [:]
+    ) -> PasteRegions {
         let screens = Set(project.screens.map(\.id))
-        let occupied = Set(screen.allRegions.map(\.frame))
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        let occupied = Set(layout.index.regions.compactMap { layout.drawnFrame(of: $0.id) })
+        let drawn = regions.map { region -> Region in
+            let copy = region.copy()
+            if let frame = layout.drawnFrame(of: region.id), layout.index.region(region.id)?.frame == region.frame {
+                let dx = frame.x - region.frame.x
+                let dy = frame.y - region.frame.y
+                for part in copy.subtree {
+                    part.frame = part.frame.offsetBy(dx: dx, dy: dy)
+                }
+            }
+            return copy
+        }
         let step = max(grid, 1)
         var offset = 0
         // Bounded so a screen filled with regions on every step can't loop for long.
         while offset < 100 * step,
-            regions.contains(where: { occupied.contains($0.frame.offsetBy(dx: offset, dy: offset)) })
+            drawn.contains(where: { occupied.contains($0.frame.offsetBy(dx: offset, dy: offset)) })
         {
             offset += step
         }
-        let copies = regions.map { region -> Region in
-            let copy = region.copy()
+        for copy in drawn {
             for part in copy.subtree {
                 part.frame = part.frame.offsetBy(dx: offset, dy: offset)
                 part.links = part.links.filter { screens.contains($0.screen) }
             }
-            return copy
         }
-        return PasteRegions(screen: screen.id, regions: copies, actionName: actionName)
+        return PasteRegions(screen: screen.id, regions: drawn, actionName: actionName, scrollOffsets: scrollOffsets)
     }
 }

@@ -19,6 +19,8 @@ struct CanvasColors {
     var marqueeFill: CGColor
     /// The link indicator on regions with links.
     var link: CGColor
+    /// The scroll indicators inside scrolling regions.
+    var scrollIndicator: CGColor
 
     init(appearance: NSAppearance) {
         var colors: [CGColor] = []
@@ -38,6 +40,7 @@ struct CanvasColors {
                 NSColor.controlAccentColor.withAlphaComponent(0.1),
                 NSColor.secondaryLabelColor,
                 NSColor.linkColor,
+                NSColor.tertiaryLabelColor,
             ].map(\.cgColor)
         }
         boundsFill = colors[0]
@@ -54,5 +57,6 @@ struct CanvasColors {
         marqueeFill = colors[11]
         description = colors[12]
         link = colors[13]
+        scrollIndicator = colors[14]
     }
 }

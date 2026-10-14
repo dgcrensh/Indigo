@@ -83,9 +83,19 @@ final class ParentingTests: XCTestCase {
         let (project, screen, outer, _, _) = Fixtures.nestedProject()
         outer.scroll = Scroll(axis: .vertical, contentWidth: 200, contentHeight: 600)
         let id = RegionID("below-fold")
-        _ = try CreateRegion(screen: screen.id, frame: Frame(x: 10, y: 400, w: 50, h: 50), title: "Below", id: id)
+        // Overlapping the frame's bottom edge, extending into content below it.
+        _ = try CreateRegion(screen: screen.id, frame: Frame(x: 10, y: 180, w: 50, h: 50), title: "Below", id: id)
             .apply(to: project)
         XCTAssertEqual(RegionIndex(screen: screen).parent(of: id)?.id, outer.id)
+    }
+
+    func testHiddenScrollingContentTakesNoChildUntilScrolledIntoView() throws {
+        let (project, screen, outer, _, _) = Fixtures.nestedProject()
+        outer.scroll = Scroll(axis: .vertical, contentWidth: 200, contentHeight: 600)
+        let id = RegionID("below-fold")
+        _ = try CreateRegion(screen: screen.id, frame: Frame(x: 10, y: 400, w: 50, h: 50), title: "Below", id: id)
+            .apply(to: project)
+        XCTAssertNil(RegionIndex(screen: screen).parent(of: id), "content below the frame isn't in view")
     }
 
     func testRegionIndexHelpers() {
