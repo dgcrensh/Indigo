@@ -5,7 +5,7 @@ on the package format from [m1-file-format.md](m1-file-format.md) and the docume
 [m3-document-shell.md](m3-document-shell.md). Independent of [m17-edit-scaling.md](m17-edit-scaling.md); either can
 ship first.
 
-**Status:** reviewed
+**Status:** shipped
 
 ## Goal
 

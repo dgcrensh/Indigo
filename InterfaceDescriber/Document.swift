@@ -22,6 +22,9 @@ final class Document: NSDocument {
     private var packageWrapper = FileWrapper(directoryWithFileWrappers: [:])
     /// The files in `packageWrapper`, which the core compares against to find what changed.
     private var packageTree: PackageTree = [:]
+    /// What the last write produced for each file, so a save skips writing the text of screens that didn't change.
+    /// Replaced whenever `packageTree` is.
+    private var encodingCache = PackageEncodingCache()
 
     override class var autosavesInPlace: Bool {
         true
@@ -54,11 +57,12 @@ final class Document: NSDocument {
         let project = try ProjectPackage.read { PackageWrapper.contents(at: $0, in: fileWrapper) }
         packageWrapper = fileWrapper
         packageTree = PackageWrapper.tree(of: fileWrapper)
+        encodingCache = PackageEncodingCache()
         model.replaceProject(with: project)
     }
 
     override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
-        let changes = ProjectPackage.write(project: model.project, previous: packageTree).changes
+        let changes = ProjectPackage.write(project: model.project, previous: packageTree, cache: encodingCache).changes
         PackageWrapper.apply(changes, to: packageWrapper)
         packageTree = ProjectPackage.applying(changes, to: packageTree)
         return packageWrapper
@@ -66,6 +70,8 @@ final class Document: NSDocument {
 
     override func revert(toContentsOf url: URL, ofType typeName: String) throws {
         try super.revert(toContentsOf: url, ofType: typeName)
+        // Reverting reads the file again, which replaces the package tree, so start the cache over too.
+        encodingCache = PackageEncodingCache()
         // The reverted project has a fresh edit session, so the old undo steps no longer apply.
         undoManager?.removeAllActions()
     }

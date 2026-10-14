@@ -51,6 +51,15 @@ final class OrderedJSONWriterTests: XCTestCase {
         )
     }
 
+    func testEscapingMatchesJSONSerialization() throws {
+        let controls = String(String.UnicodeScalarView((0..<0x20).compactMap(Unicode.Scalar.init)))
+        let string = controls + "\"quotes\" back\\slash \\\" / café e\u{301} 👋🏽 👨‍👩‍👧 \u{7F} 日本"
+        let serialized = try JSONSerialization.data(withJSONObject: [string], options: [.withoutEscapingSlashes])
+        let expected = try XCTUnwrap(String(data: serialized, encoding: .utf8))
+        XCTAssertEqual("[" + OrderedJSONWriter.quoted(string) + "]", expected)
+        XCTAssertEqual(OrderedJSONWriter.quoted("plain"), "\"plain\"")
+    }
+
     func testEscapedStringsRoundTripThroughJSONSerialization() throws {
         let original = "a\"b\\c/d\te\nf\u{01}g\u{1F}h é 👋"
         let data = OrderedJSONWriter.data(.array([.string(original)]))

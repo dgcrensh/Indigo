@@ -31,7 +31,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 15 | Canvas responsiveness: edits and pinch | [m15-canvas-responsiveness.md](plans/m15-canvas-responsiveness.md) | 4, 12 | shipped |
 | 16 | Sidebar and zoom animation responsiveness | [m16-chrome-responsiveness.md](plans/m16-chrome-responsiveness.md) | 15 | shipped |
 | 17 | Edits that cost what they change: multi-region moves, paste, undo snapshots | [m17-edit-scaling.md](plans/m17-edit-scaling.md) | 2, 9 | shipped |
-| 18 | Autosave that writes what changed | [m18-autosave-cost.md](plans/m18-autosave-cost.md) | 1, 3 | reviewed |
+| 18 | Autosave that writes what changed | [m18-autosave-cost.md](plans/m18-autosave-cost.md) | 1, 3 | shipped |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:
 

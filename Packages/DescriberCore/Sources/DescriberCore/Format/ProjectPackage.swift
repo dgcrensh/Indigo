@@ -80,24 +80,46 @@ public enum ProjectPackage {
     }
 
     /// Writes a project. Pass the package as it was last read or written as `previous` to learn which files moved
-    /// away and which are unchanged.
-    public static func write(project: Project, previous: PackageTree = [:]) -> WriteResult {
+    /// away and which are unchanged. Pass the same `cache` to every write of a document to skip writing the text of
+    /// files whose content hasn't changed since the last write; the result is the same with or without it.
+    public static func write(
+        project: Project, previous: PackageTree = [:], cache: PackageEncodingCache? = nil
+    ) -> WriteResult {
         let files = screenFiles(for: project)
-        var tree: PackageTree = [:]
-        tree[manifestPath] = OrderedJSONWriter.data(ProjectEncoding.manifest(project, files: files))
+        var values: [(path: String, value: JSONValue)] = [
+            (manifestPath, ProjectEncoding.manifest(project, files: files))
+        ]
         for screen in project.screens {
-            tree[files[screen.id]!] = OrderedJSONWriter.data(ProjectEncoding.screen(screen, in: project))
+            values.append((files[screen.id]!, ProjectEncoding.screen(screen, in: project)))
         }
         if !project.editorState.isEmpty {
-            tree[editorStatePath] = OrderedJSONWriter.data(ProjectEncoding.editorState(project.editorState))
+            values.append((editorStatePath, ProjectEncoding.editorState(project.editorState)))
         }
+
+        var tree: PackageTree = [:]
+        var unchanged: Set<String> = []
+        for (path, value) in values {
+            if let cached = cache?.entries[path], let old = previous[path], cached.value.isIdentical(to: value),
+                old == cached.data
+            {
+                tree[path] = old
+                unchanged.insert(path)
+                continue
+            }
+            let data = OrderedJSONWriter.data(value)
+            cache?.entries[path] = (value, data)
+            tree[path] = data
+            if previous[path] == data {
+                unchanged.insert(path)
+            }
+        }
+        cache?.entries = cache?.entries.filter { tree[$0.key] != nil } ?? [:]
 
         var previouslyOwned = Set(previousScreenFiles(previous))
         if previous[editorStatePath] != nil {
             previouslyOwned.insert(editorStatePath)
         }
         let removed = previouslyOwned.subtracting(tree.keys)
-        let unchanged = Set(tree.compactMap { path, data in previous[path] == data ? path : nil })
         return WriteResult(tree: tree, removed: removed, unchanged: unchanged)
     }
 
@@ -112,4 +134,13 @@ public enum ProjectPackage {
         else { return [] }
         return manifest.screens.map(\.file).filter { previous[$0] != nil }
     }
+}
+
+/// What a document last wrote for each file: the value and its text. Values are compared exactly (strings by their
+/// UTF-8 bytes), so a file whose value is identical can reuse its text without writing it again. Keep one per
+/// document and replace it whenever the document's package is replaced, as when reading or reverting.
+public final class PackageEncodingCache {
+    var entries: [String: (value: JSONValue, data: Data)] = [:]
+
+    public init() {}
 }

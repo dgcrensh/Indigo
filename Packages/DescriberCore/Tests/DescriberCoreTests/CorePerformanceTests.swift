@@ -118,6 +118,42 @@ final class CorePerformanceTests: XCTestCase {
         XCTAssertLessThan(paste, 50)
     }
 
+    /// Autosave: the 500-region screen written to text, and a ten-screen project written after retitling one region,
+    /// with and without a cache warmed by the write before.
+    func testPackageWritesWithinBudget() throws {
+        let screenValue = ProjectEncoding.screen(screen, in: project)
+        let text = time("write a screen's text", iterations: 20) { _ = OrderedJSONWriter.data(screenValue) }
+
+        let large = Project.stressTest(regionCount: 500, screenCount: 10)
+        let session = EditSession(project: large)
+        let region = try XCTUnwrap(large.screens[4].regions.first)
+        var tree = ProjectPackage.write(project: large).tree
+        var edit = 0
+        /// Retitles the region, then times only the write that follows.
+        func writeAfterRetitle(_ name: String, cache: PackageEncodingCache?) throws -> Double {
+            var elapsed: TimeInterval = 0
+            let iterations = 10
+            for _ in 0..<iterations {
+                edit += 1
+                try session.perform(RegionCommands.setTitle("Retitled \(edit)", of: region.id))
+                let start = Date()
+                let result = ProjectPackage.write(project: large, previous: tree, cache: cache)
+                elapsed += Date().timeIntervalSince(start)
+                tree = ProjectPackage.applying(result.changes, to: tree)
+            }
+            let milliseconds = elapsed / Double(iterations) * 1000
+            print(String(format: "Core, 5000 regions, %@: %.3f ms", name, milliseconds))
+            return milliseconds
+        }
+        let uncached = try writeAfterRetitle("write 10 screens after a retitle", cache: nil)
+        let cache = PackageEncodingCache()
+        tree = ProjectPackage.write(project: large, previous: tree, cache: cache).tree
+        let cached = try writeAfterRetitle("write 10 screens after a retitle, cached", cache: cache)
+        XCTAssertLessThan(text, 50)
+        XCTAssertLessThan(uncached, 500)
+        XCTAssertLessThan(cached, 500)
+    }
+
     func testSelectAllMoveOnFiveThousandRegionsWithinBudget() throws {
         let project = Project.stressTest(regionCount: 5000)
         let screen = try XCTUnwrap(project.screens.first)

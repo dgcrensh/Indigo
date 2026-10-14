@@ -45,20 +45,19 @@ public enum ProjectEncoding {
 
     /// One region and its subtree.
     public static func region(_ region: Region, in project: Project) -> JSONValue {
-        var pairs: [(key: String, value: JSONValue)] = [
-            ("id", .string(region.id.rawValue)),
-            ("title", .string(region.title)),
-        ]
+        // Appended one by one into reserved space: this runs for every region on every save.
+        var pairs: [(key: String, value: JSONValue)] = []
+        pairs.reserveCapacity(11)
+        pairs.append(("id", .string(region.id.rawValue)))
+        pairs.append(("title", .string(region.title)))
         if region.kind != .open {
             pairs.append(("kind", .string(region.kind.rawValue)))
         }
-        pairs += [
-            ("x", .int(region.frame.x)),
-            ("y", .int(region.frame.y)),
-            ("w", .int(region.frame.w)),
-            ("h", .int(region.frame.h)),
-            ("description", .string(region.description)),
-        ]
+        pairs.append(("x", .int(region.frame.x)))
+        pairs.append(("y", .int(region.frame.y)))
+        pairs.append(("w", .int(region.frame.w)))
+        pairs.append(("h", .int(region.frame.h)))
+        pairs.append(("description", .string(region.description)))
         if let scroll = region.scroll {
             pairs.append(("scroll", self.scroll(scroll)))
         }
