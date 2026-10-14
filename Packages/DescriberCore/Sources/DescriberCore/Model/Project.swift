@@ -31,9 +31,9 @@ public final class Project {
         screens.first { $0.id == id }
     }
 
-    /// The project a new document starts with: one screen at the default viewport.
-    public static func untitled() -> Project {
-        Project(name: "Untitled", screens: [Screen(name: "Screen 1", viewport: .defaultForNewScreens)])
+    /// The project a new document starts with: one screen at `viewport`, the default viewport from settings.
+    public static func untitled(viewport: Viewport = .defaultForNewScreens) -> Project {
+        Project(name: "Untitled", screens: [Screen(name: "Screen 1", viewport: viewport)])
     }
 
     /// The screen a newly opened window shows: the last active screen when it still exists, otherwise the first.

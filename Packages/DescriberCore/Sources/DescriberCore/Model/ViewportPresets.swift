@@ -47,6 +47,12 @@ public enum ViewportPresets {
         builtIn.first { $0.id == id } ?? userPresets.first { $0.id == id }
     }
 
+    /// The built-in or user preset whose ID or name is `text`, ignoring case, as `settings.json` names one.
+    public static func preset(named text: String, userPresets: [ViewportPreset] = []) -> ViewportPreset? {
+        let wanted = text.lowercased()
+        return (builtIn + userPresets).first { $0.id == wanted || $0.name.lowercased() == wanted }
+    }
+
     /// Such as "iPhone 15 — 393 × 852", "This Device — 1512 × 982" or "Custom — 500 × 400". A preset this build
     /// doesn't know, such as another Mac's user preset, shows its ID.
     public static func label(for viewport: Viewport, userPresets: [ViewportPreset] = []) -> String {

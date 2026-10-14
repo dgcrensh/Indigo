@@ -5,7 +5,7 @@ import Foundation
 public enum Snapping {
     /// The grid sizes the `G` slider offers, in points.
     public static let gridSteps = [4, 8, 12, 16, 24, 32]
-    /// The grid size a screen uses when its editor state has none, until settings provide one (milestone 10).
+    /// The grid size a screen uses when neither its editor state nor settings (`AppSettings.gridSize`) give one.
     public static let defaultGridSize = 8
 
     /// The edges a resize drags.
