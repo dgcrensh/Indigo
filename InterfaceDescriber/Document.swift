@@ -15,6 +15,13 @@ final class Document: NSDocument {
         true
     }
 
+    override init() {
+        super.init()
+        model.didRecordStep = { [weak self] actionName in
+            self?.registerUndoStep(named: actionName)
+        }
+    }
+
     override func makeWindowControllers() {
         let controller = DocumentWindowController(model: model)
         controller.canvasController.performCommand = { [weak self] command in
@@ -49,8 +56,10 @@ final class Document: NSDocument {
 
     // MARK: Editing
 
-    /// Applies `command` to the project as one undo step named after it. Every edit goes through here.
+    /// Applies `command` to the project as one undo step named after it. Every edit goes through here. A region
+    /// open in the details panel is committed and closed first, so its step comes before this one.
     func perform(_ command: Command) throws {
+        model.closeDetails()
         try model.session.perform(command)
         model.noteChange()
         registerUndoStep(named: command.actionName)
@@ -68,6 +77,8 @@ final class Document: NSDocument {
 
     private func reverseLastStep() {
         guard let undoManager else { return }
+        // Unrecorded changes in the details panel would be out of step with the undo stack.
+        model.cancelDetails()
         let session = model.session
         do {
             if undoManager.isUndoing {

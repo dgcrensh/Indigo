@@ -42,8 +42,6 @@ public struct CanvasGesture {
     public static let dragThreshold = 3.0
     /// How close, in view points, the pointer must be to a handle's center to grab it. Handles are 7 pt squares.
     public static let handleRadius = 6.0
-    /// The title a drawn region gets until the details panel opens for it (milestone 6).
-    public static let newRegionTitle = "Region"
 
     public enum Preview: Equatable {
         case none
@@ -53,6 +51,14 @@ public struct CanvasGesture {
         case newRegion(Frame)
         /// The marquee rectangle, in screen points.
         case marquee(CGRect)
+    }
+
+    /// What the details panel should do after a click (spec 6.1 and 6.4).
+    public enum DetailsRequest: Equatable, Sendable {
+        /// Open this region, committing any region open now.
+        case open(RegionID)
+        /// Commit and close the panel.
+        case close
     }
 
     private enum Kind {
@@ -73,15 +79,24 @@ public struct CanvasGesture {
     public private(set) var isDragging = false
     /// The ID a region drawn by this gesture gets.
     public let newRegionID = RegionID.make()
+    /// What the details panel should do, set on release. A region the gesture draws opens through its
+    /// `CreateRegion` command instead.
+    public private(set) var detailsRequest: DetailsRequest?
 
     private var kind: Kind = .none
     private var current: CGPoint
     /// The selection a release without a drag leaves, when it differs from the one the press made.
     private var clickSelection: [RegionID]?
+    /// The press's click count: 2 for a double-click.
+    private let clickCount: Int
 
-    /// Starts a gesture with a press at `point`, in screen points.
-    public init(pressAt point: CGPoint, modifiers: KeyCombo.Modifiers = [], context: GestureContext) {
+    /// Starts a gesture with a press at `point`, in screen points. `clickCount` is 2 for the second press of a
+    /// double-click.
+    public init(
+        pressAt point: CGPoint, modifiers: KeyCombo.Modifiers = [], clickCount: Int = 1, context: GestureContext
+    ) {
         self.context = context
+        self.clickCount = clickCount
         self.start = point
         self.current = point
         self.selection = context.selection
@@ -187,8 +202,18 @@ public struct CanvasGesture {
             if let clickSelection {
                 selection = clickSelection
             }
-            if case .writeClick = kind {
-                selection = HitTesting.region(at: start, in: context.screen).map { [$0] } ?? []
+            switch kind {
+            case .writeClick:
+                let hit = HitTesting.region(at: start, in: context.screen)
+                selection = hit.map { [$0] } ?? []
+                detailsRequest = hit.map(DetailsRequest.open) ?? .close
+            case .move where clickCount >= 2:
+                if let hit = HitTesting.region(at: start, in: context.screen) {
+                    selection = [hit]
+                    detailsRequest = .open(hit)
+                }
+            default:
+                break
             }
             return nil
         }
@@ -211,7 +236,7 @@ public struct CanvasGesture {
         case .draw:
             guard let frame = Self.drawnFrame(from: start, to: point, grid: grid) else { return nil }
             selection = [newRegionID]
-            return CreateRegion(screen: screen, frame: frame, title: Self.newRegionTitle, id: newRegionID)
+            return CreateRegion(screen: screen, frame: frame, id: newRegionID)
         }
     }
 

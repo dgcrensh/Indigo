@@ -94,6 +94,21 @@ public struct Camera: Hashable, Sendable {
         return zoomed(to: next, anchor: anchor)
     }
 
+    /// The camera `fraction` of the way from `start` to `end`, for a view of `viewSize`: the zoom moves
+    /// geometrically and the screen point at the view's center moves in a straight line, so the motion looks even at
+    /// every zoom. A fraction of 0 gives `start` and 1 gives `end`.
+    public static func interpolated(from start: Camera, to end: Camera, fraction: Double, viewSize: CGSize) -> Camera {
+        if fraction <= 0 { return start }
+        if fraction >= 1 { return end }
+        let half = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        let startCenter = start.screenPoint(fromView: half)
+        let endCenter = end.screenPoint(fromView: half)
+        let zoom = exp(log(start.zoom) + (log(end.zoom) - log(start.zoom)) * fraction)
+        let centerX = startCenter.x + (endCenter.x - startCenter.x) * fraction
+        let centerY = startCenter.y + (endCenter.y - startCenter.y) * fraction
+        return Camera(zoom: zoom, panX: centerX - half.x / zoom, panY: centerY - half.y / zoom)
+    }
+
     /// The camera that shows `rect` as large as fits in `viewSize` inside `padding` on every side, no larger than
     /// `maximumZoom`, centered.
     public static func fitting(

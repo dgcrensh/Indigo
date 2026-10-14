@@ -43,8 +43,15 @@ final class CanvasToolTests: XCTestCase {
         drag(canvas, from: CGPoint(x: 20, y: 20), to: CGPoint(x: 100, y: 75), in: document)
         let region = try XCTUnwrap(screen.regions.first)
         XCTAssertEqual(region.frame, Frame(x: 24, y: 24, w: 80, h: 48))
-        XCTAssertEqual(region.title, "Region")
+        XCTAssertEqual(region.title, "")
         XCTAssertEqual(document.model.selection, [region.id])
+        XCTAssertEqual(document.model.details?.region, region.id, "a drawn region opens in the details panel")
+        XCTAssertEqual(document.model.session.undoDepth, 0, "it is recorded when the panel closes")
+        try document.model.editDetails { try $0.setTitle("Box") }
+        undoManager.beginUndoGrouping()
+        document.model.closeDetails()
+        undoManager.endUndoGrouping()
+        canvas.update()
         XCTAssertEqual(document.model.session.undoDepth, 1)
         XCTAssertEqual(undoManager.undoActionName, "New Region")
 
