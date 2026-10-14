@@ -60,9 +60,9 @@ final class OnScreenPerformanceTests: XCTestCase {
             samples.max() ?? 0)
     }
 
-    /// A pinch with its phases, as a trackpad makes (milestone 21): begun, 40 frames one way and 20 back, ended, then the
-    /// text fitted a frame's budget at a time, as the display link does. Returns the lines to print: the first pinch
-    /// frame, every pinch frame, the frame that ends the run, and the frames that fit the text.
+    /// A pinch with its phases, as a trackpad makes (milestone 21): begun, 40 frames one way and 20 back, ended, then
+    /// the text fitted a frame's budget at a time, as the display link does. Returns the lines to print: the first
+    /// pinch frame, every pinch frame, the frame that ends the run, and the frames that fit the text.
     @MainActor
     private func phasedPinch(_ view: CanvasView, count: Int, at name: String, factor: Double) -> [String] {
         let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
