@@ -8,8 +8,8 @@ import QuartzCore
 /// (`ScrollLayout`), in zoomed screen coordinates (screen points × zoom).
 ///
 /// The layers remember what they were last laid out for, so `layoutIfNeeded(zoom:)` skips a region nothing changed
-/// on. While the zoom is changing, `layout(zoom:fitsText:)` can keep the text layers' sizes and clip them instead of
-/// re-truncating and redrawing their text every frame.
+/// on. When a zoom run rebases or ends, `layout(zoom:fitsText:)` can keep the text layers' sizes and clip them instead
+/// of re-truncating and redrawing their text, which the canvas then fits a few regions a frame.
 final class RegionLayers {
     static let titleFont = PaperFont.rounded(ofSize: 11, weight: .semibold)
     static let titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
@@ -242,6 +242,24 @@ final class RegionLayers {
         if needsLayout || laidOutZoom != zoom || !textFitted {
             layout(zoom: zoom)
         }
+    }
+
+    /// Lays the layers out for `zoom` when something changed since the last layout or the zoom is different. Without
+    /// `fitsText`, as when a zoom run rebases or ends, text already showing keeps its size, clipped, and text left
+    /// unfitted at this zoom stays so.
+    func layoutIfNeeded(zoom: Double, fitsText: Bool) {
+        if fitsText {
+            layoutIfNeeded(zoom: zoom)
+        } else if needsLayout || laidOutZoom != zoom {
+            layout(zoom: zoom, fitsText: false)
+        }
+    }
+
+    /// Draws the title and description now if their layout marked them for display, rather than in the next commit,
+    /// so the caller can count the drawing against a time budget.
+    func displayTextIfNeeded() {
+        title.displayIfNeeded()
+        descriptionText.displayIfNeeded()
     }
 
     /// Whether the title and description were last sized for the zoom they are drawn at, for tests.

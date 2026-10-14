@@ -96,16 +96,133 @@ final class CanvasPerformanceTests: XCTestCase {
             canvas.camera = Camera(zoom: 1 - 0.05 * Double(step))
         }
         XCTAssertFalse(canvas.isTextSettled, "titles that would truncate differently wait for the zoom to settle")
+        XCTAssertTrue(canvas.isInZoomRun, "a change soon after another begins a timed run")
+        XCTAssertEqual(canvas.layoutZoom, 0.95, accuracy: 1e-9, "the run keeps the zoom it began at")
+        XCTAssertEqual(canvas.zoomRunScale, 0.75 / 0.95, accuracy: 1e-9)
         let deadline = Date().addingTimeInterval(2)
         while !canvas.isTextSettled && Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
         XCTAssertTrue(canvas.isTextSettled, "the text is fitted once the zoom stays put")
+        XCTAssertEqual(canvas.zoomRunScale, 1)
 
         // Settled text is laid out as a fresh canvas at the same zoom lays it out.
         let (fresh, _) = try makeCanvas()
         fresh.camera = canvas.camera
         XCTAssertEqual(Self.titleFrames(canvas), Self.titleFrames(fresh))
+    }
+
+    // MARK: Zoom runs (milestone 21)
+
+    /// Checks that every mounted box is laid out for `zoom`, where its region is drawn.
+    @MainActor
+    private func assertBoxesLaidOut(
+        _ canvas: CanvasView, for zoom: Double, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let order = canvas.mountedRegionOrder
+        XCTAssertFalse(order.isEmpty, file: file, line: line)
+        for (id, box) in zip(order, canvas.regionsLayer.sublayers ?? []) {
+            guard let frame = canvas.drawnFrame(of: id) else {
+                XCTFail("no drawn frame for \(id)", file: file, line: line)
+                continue
+            }
+            let expected = RegionLayers.zoomed(frame, zoom)
+            XCTAssertEqual(box.frame.minX, expected.minX, accuracy: 1e-6, "\(id)", file: file, line: line)
+            XCTAssertEqual(box.frame.minY, expected.minY, accuracy: 1e-6, "\(id)", file: file, line: line)
+            XCTAssertEqual(box.frame.width, expected.width, accuracy: 1e-6, "\(id)", file: file, line: line)
+            XCTAssertEqual(box.frame.height, expected.height, accuracy: 1e-6, "\(id)", file: file, line: line)
+        }
+    }
+
+    /// Fits the queued text a frame's budget at a time, as the display link does, until none is left.
+    @MainActor
+    private func drainTextQueue(_ canvas: CanvasView) -> Int {
+        var frames = 0
+        while canvas.fitQueuedText(), frames < 10_000 {
+            frames += 1
+        }
+        return frames + 1
+    }
+
+    @MainActor
+    func testAZoomRunScalesTheLayersInsteadOfLayingThemOut() throws {
+        let (canvas, _) = try makeCanvas()
+        let anchor = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        canvas.beginZoomRun()
+        for step in 1...6 {
+            canvas.camera = Camera(zoom: 1).zoomed(to: 1 + 0.1 * Double(step), anchor: anchor)
+            XCTAssertEqual(canvas.layoutZoom, 1, "the layers stay laid out for the zoom the run began at")
+            XCTAssertEqual(Double(canvas.zoomRunScale), canvas.camera.zoom, accuracy: 1e-9)
+            assertBoxesLaidOut(canvas, for: 1)
+        }
+        XCTAssertFalse(canvas.isTextSettled)
+        // The screen origin sits where the camera puts it, and the transform scales about it.
+        XCTAssertEqual(canvas.regionsLayer.position, canvas.camera.viewPoint(fromScreen: .zero))
+        canvas.endZoomRun()
+        XCTAssertFalse(canvas.isInZoomRun)
+    }
+
+    @MainActor
+    func testAZoomRunThatStraysPastTwiceRebases() throws {
+        let (canvas, _) = try makeCanvas()
+        canvas.beginZoomRun()
+        canvas.camera = Camera(zoom: 1.8)
+        XCTAssertEqual(canvas.layoutZoom, 1)
+        canvas.camera = Camera(zoom: 2.2)
+        XCTAssertEqual(canvas.layoutZoom, 2.2, "the run rebased at the camera's zoom")
+        XCTAssertEqual(canvas.zoomRunScale, 1)
+        assertBoxesLaidOut(canvas, for: 2.2)
+        XCTAssertTrue(canvas.isInZoomRun, "the run goes on from the new layout zoom")
+        canvas.camera = Camera(zoom: 1.0)
+        XCTAssertEqual(canvas.layoutZoom, 1, "and back down past half")
+        canvas.camera = Camera(zoom: 0.9)
+        XCTAssertEqual(canvas.layoutZoom, 1)
+        XCTAssertEqual(canvas.zoomRunScale, 0.9, accuracy: 1e-9)
+        canvas.endZoomRun()
+    }
+
+    @MainActor
+    func testEndingAZoomRunLaysOutAtOnceAndFitsTheTextOverFrames() throws {
+        let (canvas, _) = try makeCanvas()
+        let anchor = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
+        canvas.beginZoomRun()
+        for step in 1...8 {
+            canvas.camera = Camera(zoom: 1).zoomed(to: 1 - 0.05 * Double(step), anchor: anchor)
+        }
+        canvas.endZoomRun()
+        XCTAssertFalse(canvas.isInZoomRun)
+        XCTAssertEqual(canvas.zoomRunScale, 1, "the transform is gone as the run ends")
+        XCTAssertEqual(canvas.layoutZoom, canvas.camera.zoom)
+        assertBoxesLaidOut(canvas, for: canvas.camera.zoom)
+        XCTAssertFalse(canvas.isTextSettled, "titles that truncate differently wait to be fitted")
+
+        let frames = drainTextQueue(canvas)
+        print("Canvas, 500 regions, text fitted after a pinch in \(frames) frames")
+        XCTAssertTrue(canvas.isTextSettled)
+        let (fresh, _) = try makeCanvas()
+        fresh.camera = canvas.camera
+        XCTAssertEqual(Self.titleFrames(canvas), Self.titleFrames(fresh))
+    }
+
+    @MainActor
+    func testANewRunDropsTheTextLeftToFitAndAZoomCommandFitsAtOnce() throws {
+        let (canvas, _) = try makeCanvas()
+        canvas.beginZoomRun()
+        canvas.camera = Camera(zoom: 0.6)
+        canvas.endZoomRun()
+        XCTAssertFalse(canvas.isTextSettled)
+        canvas.beginZoomRun()
+        canvas.camera = Camera(zoom: 0.65)
+        XCTAssertFalse(canvas.fitQueuedText(), "the new run dropped the queue")
+        XCTAssertEqual(canvas.zoomRunScale, 0.65 / 0.6, accuracy: 1e-9)
+
+        canvas.step(to: Camera(zoom: 1))
+        XCTAssertFalse(canvas.isInZoomRun, "a zoom command ends the run")
+        XCTAssertTrue(canvas.isTextSettled, "and fits the text at once")
+        assertBoxesLaidOut(canvas, for: 1)
+        canvas.step(to: Camera(zoom: 1.25))
+        XCTAssertFalse(canvas.isInZoomRun, "zoom commands in a row don't begin a run")
+        XCTAssertTrue(canvas.isTextSettled)
     }
 
     /// Each region's title frame in the box's coordinates, or `.null` for a hidden title, in z-order.

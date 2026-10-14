@@ -60,6 +60,30 @@ final class OnScreenPerformanceTests: XCTestCase {
             samples.max() ?? 0)
     }
 
+    /// A pinch with its phases, as a trackpad makes (milestone 21): begun, 40 frames one way and 20 back, ended, then
+    /// the text fitted a frame's budget at a time, as the display link does. Returns the lines to print: the first
+    /// pinch frame, every pinch frame, the frame that ends the run, and the frames that fit the text.
+    @MainActor
+    private func phasedPinch(_ view: CanvasView, count: Int, at name: String, factor: Double) -> [String] {
+        let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+        let frames = time(60) { step in
+            if step == 0 { view.beginZoomRun() }
+            let factor = step < 40 ? factor : 1 / factor
+            view.change(to: view.camera.zoomed(to: view.camera.zoom * factor, anchor: center))
+        }
+        let end = time(1) { _ in view.endZoomRun() }
+        var fitting: [Double] = []
+        while !view.isTextSettled, fitting.count < 1000 {
+            fitting += time(1) { _ in view.fitQueuedText() }
+        }
+        return [
+            String(format: "On screen, %d regions, phased pinch at %@, first frame: %.2f ms", count, name, frames[0]),
+            Self.line(count, "phased pinch frame at \(name)", frames),
+            String(format: "On screen, %d regions, phased pinch at %@, end of the run: %.2f ms", count, name, end[0]),
+            Self.line(count, "phased pinch at \(name), \(fitting.count) text-fitting frames", fitting),
+        ]
+    }
+
     @MainActor
     func testCanvasTimingsOnScreen() throws {
         for count in [500, 2000, 5000] {
@@ -89,6 +113,12 @@ final class OnScreenPerformanceTests: XCTestCase {
             }
             view.settleText()
             lines.append(Self.line(count, "pinch frame at 100 %", pinch))
+            settle(0.2)
+            lines += phasedPinch(view, count: count, at: "100 %", factor: 0.985)
+            view.change(to: Camera(zoom: 1))
+            view.settleText()
+            CATransaction.flush()
+            settle(0.2)
 
             let everything = screen.allRegions.map(\.frame.cgRect).reduce(screen.canvasBounds.cgRect) { $0.union($1) }
             let fitted = Camera.fitting(everything, viewSize: view.bounds.size, padding: 20)
@@ -101,6 +131,11 @@ final class OnScreenPerformanceTests: XCTestCase {
             }
             view.settleText()
             lines.append(Self.line(count, "pinch frame fitted", pinchFitted))
+            view.change(to: fitted)
+            view.settleText()
+            CATransaction.flush()
+            settle(0.2)
+            lines += phasedPinch(view, count: count, at: "fitted", factor: 1.01)
             view.change(to: Camera(zoom: 1))
             CATransaction.flush()
             settle(0.2)

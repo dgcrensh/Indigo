@@ -27,6 +27,11 @@ protocol CanvasInteraction: AnyObject {
 /// Only regions near the view are mounted: laid out for the zoom and in the layer tree (milestone 20). The rest wait
 /// out of the tree until a pan or zoom brings them into the covered rect (`CanvasCoverage`), so the canvas does work
 /// in proportion to what is on screen. Selected and previewed regions stay mounted wherever they are.
+///
+/// A zoom run, as a pinch or the details-panel zoom makes, is drawn with a transform (milestone 21): the mounted layers
+/// stay laid out for the zoom the run began at (`layoutZoom`), and `regionsLayer` and the overlay are scaled to the
+/// camera's zoom. When the run ends the regions are laid out for the final zoom at once, with their text clipped, and
+/// the text is fitted over the next frames, nearest the view's center first.
 final class CanvasView: NSView {
     /// The screen to draw. Call `reload()` after it changes in place.
     var screen: Screen? {
@@ -42,8 +47,6 @@ final class CanvasView: NSView {
                     positionContent()
                     if refreshCoverage() { updateMounts() }
                 } else {
-                    refreshCoverage()
-                    updateMounts()
                     zoomChanged()
                 }
                 layoutGrid()
@@ -86,7 +89,7 @@ final class CanvasView: NSView {
                     let shows = visibleDescriptions.contains(id)
                     if layers.showsDescription != shows {
                         layers.showsDescription = shows
-                        layers.layout(zoom: camera.zoom)
+                        layers.layout(zoom: layoutZoom)
                     }
                 }
             }
@@ -164,12 +167,29 @@ final class CanvasView: NSView {
     /// Whether a press started a gesture that hasn't been released yet.
     private var isTrackingGesture = false
     private let titleWidths = TitleWidths()
-    /// When the zoom last changed. A change soon after another, as in a pinch or the details-panel zoom, clips the
-    /// region text instead of fitting it, and `settleTimer` fits it once the zoom has stayed put for `textSettleDelay`.
+    /// The zoom the mounted regions and the overlay are laid out for. Outside a zoom run it is the camera's zoom;
+    /// during one, the layers are scaled from it to the camera's zoom with a transform.
+    private(set) var layoutZoom: Double = 1
+    private var zoomRun = ZoomRun.idle
+    /// When the zoom last changed. A change soon after another, outside a run begun by a gesture's phases, begins a
+    /// timed run, and `settleTimer` ends it once the zoom has stayed put for `textSettleDelay`.
     private var lastZoomChange: CFTimeInterval = -.infinity
     private var settleTimer: Timer?
-    /// How long the zoom stays put before clipped region text is fitted again, in seconds.
+    /// How long the zoom stays put before a timed zoom run ends, in seconds.
     static let textSettleDelay: CFTimeInterval = 0.15
+    /// How far a zoom run's transform may scale the layers before they are laid out again for the camera's zoom, so
+    /// the picture never blurs badly.
+    static let zoomRunScaleRange = 0.5...2.0
+    /// The regions whose text waits to be fitted after a zoom run, farthest from the view's center first, so the next
+    /// is at the end.
+    private var textQueue: [RegionID] = []
+    /// Fits the queued text a batch a frame: a display link while the window is on screen, a timer otherwise.
+    private var textFitLink: CADisplayLink?
+    private var textFitTimer: Timer?
+    /// How long fitting queued text may take each frame, in seconds: about half a frame at 120 Hz.
+    static let textFitBudget: CFTimeInterval = 0.004
+    /// Whether the camera change under way is a single step, as a zoom command makes, rather than part of a run.
+    private var isSteppingZoom = false
     private var colors = CanvasColors(appearance: NSAppearance.currentDrawing())
 
     override init(frame frameRect: NSRect) {
@@ -393,7 +413,7 @@ final class CanvasView: NSView {
         let positions = mountPositions(layout, coverage)
         // Most camera changes mount and unmount nothing.
         if !syncing, positions == mountedPositions { return }
-        let zoom = camera.zoom
+        let zoom = layoutZoom
         var mounting: Set<RegionID> = []
         mounting.reserveCapacity(positions.count)
         var boxes: [CALayer] = []
@@ -507,7 +527,7 @@ final class CanvasView: NSView {
         var layers: RegionLayers?
         withoutAnimation {
             layers = prepare(id)
-            layers?.layoutIfNeeded(zoom: camera.zoom)
+            layers?.layoutIfNeeded(zoom: layoutZoom)
         }
         return layers
     }
@@ -560,7 +580,7 @@ final class CanvasView: NSView {
         scrollLayout = ScrollLayout(screen: screen, offsets: scrollOffsets)
         visibleRegions = nil
         updateMounts(syncing: true)
-        let zoom = camera.zoom
+        let zoom = layoutZoom
         for layers in mountedLayers {
             layers.layoutIfNeeded(zoom: zoom)
         }
@@ -587,29 +607,108 @@ final class CanvasView: NSView {
         !contentOutline.isHidden
     }
 
-    /// Lays out for a new zoom. The first change in a while fits the region text at once; one that follows soon
-    /// after another clips the text that is showing and leaves fitting it to `settleText()`.
+    /// Lays out for a new zoom. Outside a zoom run the regions are laid out for it and their text fitted at once. A
+    /// change soon after another begins a timed run, unless it is a zoom command's step. During a run nothing is laid
+    /// out: the transform scales the layers, until it strays out of `zoomRunScaleRange` and the run rebases.
     private func zoomChanged() {
         let now = CACurrentMediaTime()
-        let isRun = now - lastZoomChange < Self.textSettleDelay
+        let follows = now - lastZoomChange < Self.textSettleDelay
         lastZoomChange = now
-        layoutContent(fitsText: !isRun)
-        if isRun {
-            scheduleTextSettle()
+        if isSteppingZoom {
+            abandonZoomRun()
+        } else if zoomRun == .idle, follows {
+            stopFittingText()
+            zoomRun = .timed
+        }
+        if zoomRun == .timed {
+            scheduleTimedRunEnd()
+        }
+        refreshCoverage()
+        guard zoomRun != .idle else {
+            stopFittingText()
+            layoutZoom = camera.zoom
+            updateMounts()
+            layoutContent()
+            return
+        }
+        if Self.zoomRunScaleRange.contains(camera.zoom / layoutZoom) {
+            updateMounts()
+        } else {
+            // Rebase: the mounted regions are laid out for the camera's zoom, their text clipped, and the transform
+            // goes back to 1.
+            layoutZoom = camera.zoom
+            updateMounts()
+            for layers in mountedLayers {
+                layers.layoutIfNeeded(zoom: layoutZoom, fitsText: false)
+            }
+            layoutOverlay()
+        }
+        layoutSheet()
+        positionContent()
+    }
+
+    /// Begins a zoom run, as a pinch's first event and the details-panel zoom do. Until `endZoomRun()`, zoom changes
+    /// scale the laid-out layers with a transform rather than laying them out, and any text waiting to be fitted waits
+    /// for the run to end.
+    func beginZoomRun() {
+        settleTimer?.invalidate()
+        settleTimer = nil
+        stopFittingText()
+        zoomRun = .explicit
+    }
+
+    /// Ends the zoom run under way: lays the mounted regions out for the camera's zoom with their text clipped and
+    /// removes the transform, so everything is where it belongs at once, then fits the text over the next frames,
+    /// within `textFitBudget` a frame, nearest the view's center first.
+    func endZoomRun() {
+        guard zoomRun != .idle else { return }
+        finishZoomRun()
+        let center = camera.screenPoint(fromView: CGPoint(x: bounds.midX, y: bounds.midY))
+        var waiting: [(id: RegionID, distance: Double)] = []
+        for (id, layers) in zip(mountedIDs, mountedLayers) where !layers.isTextFitted {
+            let frame = layers.drawnFrame
+            let dx = Double(frame.x) + Double(frame.w) / 2 - Double(center.x)
+            let dy = Double(frame.y) + Double(frame.h) / 2 - Double(center.y)
+            waiting.append((id, dx * dx + dy * dy))
+        }
+        textQueue = waiting.sorted { $0.distance > $1.distance }.map(\.id)
+        if !textQueue.isEmpty {
+            startFittingText()
         }
     }
 
-    /// Fits the region text once the zoom has stayed put for `textSettleDelay`, checking again if it moved since.
-    private func scheduleTextSettle() {
+    /// Ends the zoom run's transform: lays the mounted regions and the overlay out for the camera's zoom, text clipped.
+    private func finishZoomRun() {
+        abandonZoomRun()
+        withoutAnimation {
+            layoutZoom = camera.zoom
+            for layers in mountedLayers {
+                layers.layoutIfNeeded(zoom: layoutZoom, fitsText: false)
+            }
+            layoutOverlay()
+            positionContent()
+        }
+    }
+
+    /// Forgets the zoom run under way without laying anything out, as a zoom command does before laying out itself.
+    private func abandonZoomRun() {
+        zoomRun = .idle
+        settleTimer?.invalidate()
+        settleTimer = nil
+    }
+
+    /// Ends the timed run once the zoom has stayed put for `textSettleDelay`, checking again if it moved since.
+    private func scheduleTimedRunEnd() {
         guard settleTimer == nil else { return }
         let timer = Timer(timeInterval: Self.textSettleDelay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.settleTimer = nil
+                guard self.zoomRun == .timed else { return }
                 if CACurrentMediaTime() - self.lastZoomChange < Self.textSettleDelay {
-                    self.scheduleTextSettle()
+                    self.scheduleTimedRunEnd()
                 } else {
-                    self.settleText()
+                    self.endZoomRun()
                 }
             }
         }
@@ -617,27 +716,112 @@ final class CanvasView: NSView {
         settleTimer = timer
     }
 
-    /// Fits any mounted region text a zoom left clipped to the current zoom. Regions that aren't mounted are fitted
-    /// when they mount.
+    private func startFittingText() {
+        guard textFitLink == nil, textFitTimer == nil else { return }
+        if window?.isVisible == true {
+            let link = displayLink(target: self, selector: #selector(fitTextOnFrame(_:)))
+            link.add(to: .main, forMode: .common)
+            textFitLink = link
+        } else {
+            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    _ = self?.fitQueuedText()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            textFitTimer = timer
+        }
+    }
+
+    @objc private func fitTextOnFrame(_ link: CADisplayLink) {
+        fitQueuedText()
+    }
+
+    /// Fits the queued regions' text, nearest the view's center first, until `budget` seconds have passed. Each fitted
+    /// title is drawn here rather than in the commit, as the drawing is most of the cost and the budget has to see it.
+    /// Regions that unmounted since are skipped: they are fitted when they mount. Returns whether any text is left.
+    @discardableResult
+    func fitQueuedText(budget: CFTimeInterval = textFitBudget) -> Bool {
+        let start = CACurrentMediaTime()
+        withoutAnimation {
+            while let id = textQueue.popLast() {
+                if mounted.contains(id), let layers = regionLayers[id] {
+                    layers.layoutIfNeeded(zoom: layoutZoom)
+                    layers.displayTextIfNeeded()
+                }
+                if CACurrentMediaTime() - start >= budget { break }
+            }
+        }
+        if textQueue.isEmpty {
+            stopFittingText()
+        }
+        return !textQueue.isEmpty
+    }
+
+    /// Drops the text waiting to be fitted and stops fitting it.
+    private func stopFittingText() {
+        textQueue = []
+        textFitLink?.invalidate()
+        textFitLink = nil
+        textFitTimer?.invalidate()
+        textFitTimer = nil
+    }
+
+    /// Ends any zoom run and fits all the mounted region text at once, as a zoom command and tests want. Regions that
+    /// aren't mounted are fitted when they mount.
     func settleText() {
-        settleTimer?.invalidate()
-        settleTimer = nil
+        if zoomRun != .idle {
+            finishZoomRun()
+        }
+        stopFittingText()
         withoutAnimation {
             for layers in mountedLayers where !layers.isTextFitted {
-                layers.layout(zoom: camera.zoom)
+                layers.layout(zoom: layoutZoom)
             }
         }
     }
 
-    /// Whether every region's text is fitted to the zoom, for tests. A region that isn't mounted is fitted when it
-    /// mounts or a test asks about it.
+    /// Whether every region's text is fitted to the zoom, for tests: no zoom run is under way and no text waits to be
+    /// fitted. A region that isn't mounted is fitted when it mounts or a test asks about it.
     var isTextSettled: Bool {
-        mountedLayers.allSatisfy(\.isTextFitted)
+        zoomRun == .idle && textQueue.isEmpty && mountedLayers.allSatisfy(\.isTextFitted)
     }
 
-    /// Sizes everything for the camera's zoom, then positions it. Regions laid out for this zoom with nothing changed
-    /// since are skipped; with `fitsText` false, a zoom change keeps each region's text at its size, clipped.
-    private func layoutContent(fitsText: Bool = true) {
+    /// Whether a zoom run is under way, for tests.
+    var isInZoomRun: Bool {
+        zoomRun != .idle
+    }
+
+    /// The scale the zoom run's transform gives the regions, for tests: 1 outside a run.
+    var zoomRunScale: CGFloat {
+        regionsLayer.transform.m11
+    }
+
+    /// Moves to `newCamera` in one step, as a zoom command does: ends any zoom run, lays out for the new zoom and fits
+    /// the text at once. The next change doesn't count as following this one, so it doesn't begin a timed run.
+    func step(to newCamera: Camera) {
+        isSteppingZoom = true
+        change(to: newCamera)
+        isSteppingZoom = false
+        lastZoomChange = -.infinity
+    }
+
+    /// Lays the mounted regions out for `layoutZoom`, fitting their text, and the sheet for the camera's zoom, then
+    /// positions everything. Regions laid out for this zoom with nothing changed since are skipped.
+    private func layoutContent() {
+        guard screen != nil else { return }
+        layoutSheet()
+        let zoom = layoutZoom
+        for layers in mountedLayers {
+            layers.layoutIfNeeded(zoom: zoom)
+        }
+        layoutOverlay()
+        positionContent()
+    }
+
+    /// Sizes the sheet and the viewport outline for the camera's zoom. They are one layer each, so they are laid out
+    /// for every zoom change, in a run or not.
+    private func layoutSheet() {
         guard let screen else { return }
         let zoom = camera.zoom
         boundsLayer.bounds = CGRect(origin: .zero, size: RegionLayers.zoomed(screen.canvasBounds, zoom).size)
@@ -653,22 +837,20 @@ final class CanvasView: NSView {
         } else {
             viewportOutline.isHidden = true
         }
-        for layers in mountedLayers {
-            if fitsText {
-                layers.layoutIfNeeded(zoom: zoom)
-            } else {
-                layers.layout(zoom: zoom, fitsText: false)
-            }
-        }
-        layoutOverlay()
-        positionContent()
     }
 
-    /// Moves the content for the camera's pan. Nothing is resized or redrawn.
+    /// Moves the content for the camera's pan, and scales the regions and the overlay from `layoutZoom` to the
+    /// camera's zoom. Nothing is resized or redrawn.
     private func positionContent() {
         let origin = camera.viewPoint(fromScreen: .zero)
         regionsLayer.position = origin
         overlayLayer.position = origin
+        let scale = CGFloat(camera.zoom / layoutZoom)
+        let transform = scale == 1 ? CATransform3DIdentity : CATransform3DMakeScale(scale, scale, 1)
+        if !CATransform3DEqualToTransform(regionsLayer.transform, transform) {
+            regionsLayer.transform = transform
+            overlayLayer.transform = transform
+        }
         if let screen {
             boundsLayer.position = camera.viewPoint(fromScreen: screen.canvasBounds.cgRect.origin)
         }
@@ -721,7 +903,7 @@ final class CanvasView: NSView {
         let changed = Set(previewFrames.keys).union(frames.keys)
         previewFrames = frames
         updateMounts()
-        let zoom = camera.zoom
+        let zoom = layoutZoom
         for id in changed where mounted.contains(id) {
             prepare(id)?.layoutIfNeeded(zoom: zoom)
         }
@@ -729,7 +911,7 @@ final class CanvasView: NSView {
 
     /// Lays out the region being drawn, the marquee and the handles for the camera's zoom.
     private func layoutOverlay() {
-        let zoom = camera.zoom
+        let zoom = layoutZoom
         switch preview {
         case .newRegion(let frame):
             Self.outline(newRegionLayer, RegionLayers.zoomed(frame, zoom))
@@ -760,7 +942,7 @@ final class CanvasView: NSView {
         if let layout = scrollLayout, case .none = preview {
             for id in selection where regions[id]?.scroll != nil {
                 guard layout.visibleFrame(of: id) != nil, let area = layout.drawnContentArea(of: id) else { continue }
-                path.addRect(RegionLayers.zoomed(area, camera.zoom))
+                path.addRect(RegionLayers.zoomed(area, layoutZoom))
             }
         }
         contentOutline.isHidden = path.isEmpty
@@ -793,7 +975,7 @@ final class CanvasView: NSView {
             }
             return
         }
-        let rect = RegionLayers.zoomed(frame, camera.zoom)
+        let rect = RegionLayers.zoomed(frame, layoutZoom)
         let size = Self.handleSize
         for (handle, layer) in zip(ResizeHandle.allCases, handleLayers) {
             let center = handle.point(on: rect)
@@ -917,10 +1099,13 @@ final class CanvasView: NSView {
 
     override func magnify(with event: NSEvent) {
         guard screen != nil else { return }
+        if event.phase == .began {
+            beginZoomRun()
+        }
         let anchor = convert(event.locationInWindow, from: nil)
         change(to: camera.zoomed(to: camera.zoom * (1 + event.magnification), anchor: anchor))
         if event.phase == .ended || event.phase == .cancelled {
-            settleText()
+            endZoomRun()
         }
     }
 
@@ -1023,6 +1208,15 @@ final class CanvasView: NSView {
         camera = newCamera
         onCameraChange?(newCamera)
     }
+}
+
+/// Whether the canvas is in a zoom run, and how it began.
+private enum ZoomRun {
+    case idle
+    /// Begun by `beginZoomRun()`, as a pinch's first event or the details-panel zoom does, and ended by `endZoomRun()`.
+    case explicit
+    /// Begun by a zoom change soon after another, and ended once the zoom stays put for `textSettleDelay`.
+    case timed
 }
 
 /// What the grid's row image was drawn for.
