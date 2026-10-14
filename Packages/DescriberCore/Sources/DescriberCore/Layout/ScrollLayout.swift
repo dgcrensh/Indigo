@@ -201,6 +201,20 @@ public struct ScrollLayout {
         }
     }
 
+    /// The draw-order positions of the regions with a visible part that has some area, and the smallest rectangle
+    /// holding all of those parts (`.null` when there are none). A rectangle that contains `extent` intersects exactly
+    /// these regions.
+    public func visibleRegions() -> (positions: [Int], extent: CGRect) {
+        var positions: [Int] = []
+        var extent = CGRect.null
+        for position in index.regions.indices {
+            guard let visible = visibleFrame(at: position), visible.w > 0, visible.h > 0 else { continue }
+            positions.append(position)
+            extent = extent.union(visible.cgRect)
+        }
+        return (positions, extent)
+    }
+
     /// The region two-finger scroll over `point` scrolls (spec Section 5): the topmost of `selection` that has
     /// content to scroll and whose visible part contains the point. Nil means the canvas pans.
     public func scrollTarget(at point: CGPoint, among selection: [RegionID]) -> RegionID? {

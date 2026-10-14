@@ -82,8 +82,7 @@ final class CanvasView: NSView {
         didSet {
             guard visibleDescriptions != oldValue else { return }
             withoutAnimation {
-                for id in mounted {
-                    guard let layers = regionLayers[id] else { continue }
+                for (id, layers) in zip(mountedIDs, mountedLayers) {
                     let shows = visibleDescriptions.contains(id)
                     if layers.showsDescription != shows {
                         layers.showsDescription = shows
@@ -150,6 +149,12 @@ final class CanvasView: NSView {
     /// The draw-order positions of the mounted regions in `scrollLayout`, and their boxes as `regionsLayer` holds them.
     private var mountedPositions: [Int] = []
     private var mountedBoxes: [CALayer] = []
+    /// The mounted regions and their layers in draw order, so a frame walks them without looking anything up.
+    private var mountedIDs: [RegionID] = []
+    private var mountedLayers: [RegionLayers] = []
+    /// The draw-order positions of the regions with a visible part in `scrollLayout`, and the rect holding them all,
+    /// so a camera whose covered rect holds them all mounts them without testing each one.
+    private var visibleRegions: (positions: [Int], extent: CGRect)?
     /// `selection` as a set.
     private var selectedIDs: Set<RegionID> = []
     /// The drawn frames a gesture previews.
@@ -333,6 +338,9 @@ final class CanvasView: NSView {
                 mounted = []
                 mountedPositions = []
                 mountedBoxes = []
+                mountedIDs = []
+                mountedLayers = []
+                visibleRegions = nil
                 regionsLayer.sublayers = nil
                 layoutGrid()
                 layoutOverlay()
@@ -340,6 +348,7 @@ final class CanvasView: NSView {
             }
             let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
             self.scrollLayout = layout
+            visibleRegions = nil
             var regions: [RegionID: Region] = [:]
             regions.reserveCapacity(layout.index.regions.count)
             for region in layout.index.regions {
@@ -389,6 +398,10 @@ final class CanvasView: NSView {
         mounting.reserveCapacity(positions.count)
         var boxes: [CALayer] = []
         boxes.reserveCapacity(positions.count)
+        var ids: [RegionID] = []
+        ids.reserveCapacity(positions.count)
+        var mountedLayers: [RegionLayers] = []
+        mountedLayers.reserveCapacity(positions.count)
         for position in positions {
             let id = layout.index.regions[position].id
             let layers: RegionLayers
@@ -403,15 +416,23 @@ final class CanvasView: NSView {
             }
             mounting.insert(id)
             boxes.append(layers.box)
+            ids.append(id)
+            mountedLayers.append(layers)
         }
         mounted = mounting
+        mountedIDs = ids
+        self.mountedLayers = mountedLayers
         mountedPositions = positions
         setMountedBoxes(boxes, keepsOrder: !syncing)
     }
 
     /// The draw-order positions to mount: the regions in the covered rect, the selection and the previewed regions.
     private func mountPositions(_ layout: ScrollLayout, _ coverage: CanvasCoverage) -> [Int] {
-        let covered = layout.regions(intersecting: coverage.covered)
+        let visible = visibleRegions ?? layout.visibleRegions()
+        visibleRegions = visible
+        let covered =
+            coverage.covered.contains(visible.extent)
+            ? visible.positions : layout.regions(intersecting: coverage.covered)
         var extra: [Int] = []
         for id in selection {
             if let position = layout.index.position(of: id) { extra.append(position) }
@@ -537,10 +558,11 @@ final class CanvasView: NSView {
     private func applyScroll() {
         guard let screen else { return }
         scrollLayout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        visibleRegions = nil
         updateMounts(syncing: true)
         let zoom = camera.zoom
-        for id in mounted {
-            regionLayers[id]?.layoutIfNeeded(zoom: zoom)
+        for layers in mountedLayers {
+            layers.layoutIfNeeded(zoom: zoom)
         }
         layoutOverlay()
     }
@@ -601,8 +623,7 @@ final class CanvasView: NSView {
         settleTimer?.invalidate()
         settleTimer = nil
         withoutAnimation {
-            for id in mounted {
-                guard let layers = regionLayers[id], !layers.isTextFitted else { continue }
+            for layers in mountedLayers where !layers.isTextFitted {
                 layers.layout(zoom: camera.zoom)
             }
         }
@@ -611,7 +632,7 @@ final class CanvasView: NSView {
     /// Whether every region's text is fitted to the zoom, for tests. A region that isn't mounted is fitted when it
     /// mounts or a test asks about it.
     var isTextSettled: Bool {
-        mounted.allSatisfy { regionLayers[$0]?.isTextFitted ?? true }
+        mountedLayers.allSatisfy(\.isTextFitted)
     }
 
     /// Sizes everything for the camera's zoom, then positions it. Regions laid out for this zoom with nothing changed
@@ -632,8 +653,7 @@ final class CanvasView: NSView {
         } else {
             viewportOutline.isHidden = true
         }
-        for id in mounted {
-            guard let layers = regionLayers[id] else { continue }
+        for layers in mountedLayers {
             if fitsText {
                 layers.layoutIfNeeded(zoom: zoom)
             } else {
@@ -677,8 +697,8 @@ final class CanvasView: NSView {
     }
 
     private func applySelection() {
-        for id in mounted {
-            regionLayers[id]?.isSelected = selectedIDs.contains(id)
+        for (id, layers) in zip(mountedIDs, mountedLayers) {
+            layers.isSelected = selectedIDs.contains(id)
         }
         updateMounts()
         layoutHandles()

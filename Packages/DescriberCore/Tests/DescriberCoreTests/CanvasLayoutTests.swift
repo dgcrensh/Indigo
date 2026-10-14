@@ -204,4 +204,16 @@ final class CanvasLayoutTests: XCTestCase {
         XCTAssertNil(layout.visibleFrame(of: row1.id))
         XCTAssertFalse(ids.contains(row1.id))
     }
+
+    func testVisibleRegionsAreTheOnesARectAroundThemAllIntersects() throws {
+        let screen = try XCTUnwrap(Project.stressTest(regionCount: 500).screens.first)
+        let container = try XCTUnwrap(screen.regions.first)
+        container.scroll = Scroll(axis: .vertical, contentWidth: 340, contentHeight: 600)
+        let layout = ScrollLayout(screen: screen, offsets: [container.id: ScrollOffset(x: 0, y: 200)])
+        let visible = layout.visibleRegions()
+        XCTAssertEqual(visible.positions, layout.regions(intersecting: visible.extent.insetBy(dx: -1, dy: -1)))
+        XCTAssertEqual(visible.positions.count, 500 - 12, "rows 1 to 3 of the first container and their items")
+        XCTAssertEqual(visible.extent.minX, 16)
+        XCTAssertEqual(visible.extent.minY, 16)
+    }
 }
