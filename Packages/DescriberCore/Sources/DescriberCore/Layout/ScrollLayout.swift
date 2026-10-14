@@ -14,12 +14,30 @@ import Foundation
 ///
 /// Built from the screen as it is now, like `RegionIndex`, so build a new one after each command or scroll.
 public struct ScrollLayout {
-    private struct Entry {
+    struct Entry {
         let drawn: Frame
         /// The intersection of the drawn frames of the scrolling regions around this one, or nil when there are none.
         let clip: Frame?
         /// What this region's children's frames are moved by: its own shift plus its offset.
         let contentShift: ScrollOffset
+        /// The content area where it is drawn at its scroll position: the drawn frame for a region that doesn't
+        /// scroll.
+        let drawnContent: Frame
+        /// The area of its frame, which parenting compares.
+        let area: Int
+    }
+
+    /// Holds the placement grid once it is built, so a layout passed by value builds it once. Replaced rather than
+    /// changed when a copy of the layout changes, so copies never see each other's grid.
+    private final class GridCache {
+        var grid: PlacementGrid?
+        /// How many placements asked for the grid before it was built.
+        var asked = 0
+
+        init(_ grid: PlacementGrid? = nil, asked: Int = 0) {
+            self.grid = grid
+            self.asked = asked
+        }
     }
 
     public private(set) var index: RegionIndex
@@ -29,6 +47,7 @@ public struct ScrollLayout {
     private let saved: [RegionID: ScrollOffset]
     /// The offset of every region scrolled away from its origin, clamped.
     public private(set) var offsets: [RegionID: ScrollOffset] = [:]
+    private var gridCache = GridCache()
 
     /// `offsets` are the saved offsets of the screen's editor state; offsets of regions that no longer scroll, or
     /// past the end of their content, are clamped.
@@ -42,8 +61,17 @@ public struct ScrollLayout {
     /// Adds `region` and its subtree as the last top-level region, as appending it to the screen's regions and
     /// building a new layout would. A top-level region has no shift or clip, so nothing else moves.
     mutating func appendTopLevel(_ region: Region) {
+        let start = entries.count
         index.appendTopLevel(region)
         add([region], shift: .zero, clip: nil)
+        if !isKnownUniquelyReferenced(&gridCache) {
+            gridCache = GridCache(gridCache.grid, asked: gridCache.asked)
+        }
+        if gridCache.grid != nil {
+            for position in start..<entries.count {
+                gridCache.grid!.add(position, content: entries[position].drawnContent)
+            }
+        }
     }
 
     /// Walks in draw order, so each entry lands at its region's position in `index`.
@@ -52,15 +80,22 @@ public struct ScrollLayout {
             let drawn = region.frame.offsetBy(dx: -shift.x, dy: -shift.y)
             var contentShift = shift
             var childClip = clip
-            if region.scroll != nil {
+            // The content area is the frame for a region that doesn't scroll (`Region.contentArea`).
+            var drawnContent = drawn
+            if let scroll = region.scroll {
                 let offset = Self.clamped(saved[region.id] ?? .zero, in: region)
                 if offset != .zero {
                     offsets[region.id] = offset
                 }
                 contentShift = ScrollOffset(x: shift.x + offset.x, y: shift.y + offset.y)
                 childClip = clip.map { $0.intersection(drawn) ?? Frame(x: drawn.x, y: drawn.y, w: 0, h: 0) } ?? drawn
+                drawnContent = Frame(
+                    x: drawn.x - offset.x, y: drawn.y - offset.y, w: scroll.contentWidth, h: scroll.contentHeight)
             }
-            entries.append(Entry(drawn: drawn, clip: clip, contentShift: contentShift))
+            entries.append(
+                Entry(
+                    drawn: drawn, clip: clip, contentShift: contentShift, drawnContent: drawnContent,
+                    area: drawn.w * drawn.h))
             add(region.children, shift: contentShift, clip: childClip)
         }
     }
@@ -145,8 +180,27 @@ public struct ScrollLayout {
 
     /// The content area of the region at draw order `position` where it is drawn.
     func drawnContentArea(at position: Int) -> Frame {
-        let shift = entries[position].contentShift
-        return index.regions[position].contentArea.offsetBy(dx: -shift.x, dy: -shift.y)
+        entries[position].drawnContent
+    }
+
+    /// What the layout knows about the region at draw order `position`.
+    func entry(at position: Int) -> Entry {
+        entries[position]
+    }
+
+    /// The regions by where their drawn content areas are, for a layout that places more than one region. Nil the
+    /// first time it is asked for: a layout used for one placement, as after each placement that changes the tree, is
+    /// cheaper scanned than indexed. Built the second time.
+    func placementGrid() -> PlacementGrid? {
+        if let grid = gridCache.grid { return grid }
+        gridCache.asked += 1
+        guard gridCache.asked > 1 else { return nil }
+        var grid = PlacementGrid()
+        for (position, entry) in entries.enumerated() {
+            grid.add(position, content: entry.drawnContent)
+        }
+        gridCache.grid = grid
+        return grid
     }
 
     /// The frame in the file of a region drawn at `drawn` as a child of `parent` (nil for the top level).

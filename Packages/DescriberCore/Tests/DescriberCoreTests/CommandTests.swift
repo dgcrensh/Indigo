@@ -484,4 +484,33 @@ final class CommandTests: XCTestCase {
         try session.undo()
         XCTAssertEqual(ProjectPackage.write(project: project, previous: tree).unchanged, Set(tree.keys))
     }
+
+    // MARK: Finding regions
+
+    func testRegionLookupFindsARegionNestedOnTheLastScreen() throws {
+        let project = Project.stressTest(regionCount: 50, screenCount: 6)
+        let last = try XCTUnwrap(project.screens.last)
+        let nested = try XCTUnwrap(last.allRegions.last { !$0.children.isEmpty }?.children.last)
+        XCTAssertTrue(project.region(withID: nested.id)?.region === nested)
+        XCTAssertEqual(project.region(withID: nested.id)?.screen.id, last.id)
+        XCTAssertTrue(project.region(withID: nested.id, onScreen: last.id)?.region === nested)
+    }
+
+    func testRegionLookupWithAWrongScreenStillFindsTheRegion() throws {
+        let project = Project.stressTest(regionCount: 50, screenCount: 6)
+        let first = try XCTUnwrap(project.screens.first)
+        let last = try XCTUnwrap(project.screens.last)
+        let region = try XCTUnwrap(last.allRegions.last)
+        let found = project.region(withID: region.id, onScreen: first.id)
+        XCTAssertTrue(found?.region === region)
+        XCTAssertEqual(found?.screen.id, last.id)
+        XCTAssertTrue(project.region(withID: region.id, onScreen: ScreenID("missing"))?.region === region)
+    }
+
+    func testRegionLookupOfAMissingRegionIsNil() throws {
+        let project = Project.stressTest(regionCount: 50, screenCount: 6)
+        let first = try XCTUnwrap(project.screens.first)
+        XCTAssertNil(project.region(withID: RegionID("missing")))
+        XCTAssertNil(project.region(withID: RegionID("missing"), onScreen: first.id))
+    }
 }

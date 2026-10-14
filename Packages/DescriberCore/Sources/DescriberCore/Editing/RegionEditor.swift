@@ -84,7 +84,7 @@ public final class RegionEditor {
 
     /// Whether the region is still in the project. An undo that runs while the panel is open can remove it.
     public var regionExists: Bool {
-        session.project.region(withID: region) != nil
+        session.project.region(withID: region, onScreen: screen) != nil
     }
 
     // MARK: Changing fields

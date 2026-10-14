@@ -387,7 +387,7 @@ final class DetailsPanelController: NSViewController {
 
     /// The open region's frame, which the scroll content can't be smaller than.
     private var regionFrame: Frame? {
-        editor.flatMap { model.project.region(withID: $0.region)?.region.frame }
+        editor.flatMap { model.project.region(withID: $0.region, onScreen: $0.screen)?.region.frame }
     }
 
     /// The scroll positions on the open region's screen, so children that changing the scrolling re-places land where

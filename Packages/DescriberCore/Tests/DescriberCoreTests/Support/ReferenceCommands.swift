@@ -89,7 +89,9 @@ enum ReferenceCommands {
         var best: (region: Region, area: Int)?
         for region in index.regions {
             if let excluding, index.path(to: region.id).contains(where: { $0.id == excluding }) { continue }
-            guard let content = layout.drawnContentArea(of: region.id), content.contains(drawn) else { continue }
+            // From the region itself rather than the layout's stored content areas, which the reference checks.
+            let shift = layout.contentShift(of: region.id)
+            guard region.contentArea.offsetBy(dx: -shift.x, dy: -shift.y).contains(drawn) else { continue }
             if region.scroll != nil, region.id != keeping {
                 guard let frame = layout.drawnFrame(of: region.id), frame.intersects(drawn) else { continue }
             }
