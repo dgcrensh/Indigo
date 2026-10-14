@@ -217,6 +217,8 @@ final class DetailsPanelTests: XCTestCase {
         defer { controller.close() }
         draw(canvas, from: CGPoint(x: 20, y: 20), to: CGPoint(x: 100, y: 75), in: document)
         let window = try XCTUnwrap(controller.window)
+        XCTAssertTrue(controller.detailsController.isEditingText(window.firstResponder))
+        XCTAssertIdentical(window.delegate, controller)
         XCTAssertIdentical(window.undoManager, controller.detailsController.textUndoManager)
         window.makeFirstResponder(canvas.canvasView)
         XCTAssertIdentical(window.undoManager, document.undoManager)
@@ -269,8 +271,8 @@ final class DetailsPanelTests: XCTestCase {
         let first = try addRegion(Frame(x: 16, y: 16, w: 80, h: 40), titled: "First", to: document)
         _ = try addRegion(Frame(x: 16, y: 200, w: 80, h: 40), titled: "Second", to: document)
         canvas.update()
-        canvas.choose(.write)
-        click(canvas, at: CGPoint(x: 30, y: 30), in: document)
+        // Opened directly: an empty undo group from a click would sit on top of the undo stack.
+        try document.model.openDetails(for: first.id)
         type("Changed", into: panel.titleField, of: panel)
 
         document.undoManager?.undo()

@@ -191,7 +191,10 @@ final class DetailsPanelController: NSViewController {
         guard let editor else { return }
         isLoading = true
         defer { isLoading = false }
-        titleField.abortEditing()
+        // End any editing first, so the field editor can't write the last region's text back into a field.
+        if let window = view.window, isEditingText(window.firstResponder) {
+            window.makeFirstResponder(nil)
+        }
         textUndoManager.removeAllActions()
         let fields = editor.fields
         titleField.stringValue = fields.title
@@ -236,6 +239,10 @@ final class DetailsPanelController: NSViewController {
     /// Whether `responder` is a text view editing one of the panel's fields.
     func isEditingText(_ responder: NSResponder?) -> Bool {
         guard let text = responder as? NSText, isViewLoaded else { return false }
+        // A field editor may sit outside the field it edits, but the field is its delegate.
+        if let field = (text as? NSTextView)?.delegate as? NSView, field.isDescendant(of: view) {
+            return true
+        }
         return text.isDescendant(of: view)
     }
 
