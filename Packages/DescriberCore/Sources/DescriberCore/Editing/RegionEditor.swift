@@ -52,7 +52,7 @@ public final class RegionEditor {
     private let removeNewRegion: Command?
     /// For an existing region, its screen's layout when the session started, which changing the scrolling can
     /// change.
-    private let originalLayout: RegionLayout?
+    private let originalLayout: LayoutChanges?
     private var isFinished = false
 
     /// Opens an existing region.
@@ -65,7 +65,7 @@ public final class RegionEditor {
         self.original = RegionFields(found.region)
         self.fields = original
         self.removeNewRegion = nil
-        self.originalLayout = RegionLayout(screen: found.screen)
+        self.originalLayout = LayoutChanges(wholeScreen: found.screen)
     }
 
     /// Draws a new region with `command`, without recording it, and opens it.
@@ -188,7 +188,7 @@ public final class RegionEditor {
                 SetRegionValue(actionName: actionName, region: region, keyPath: \.scroll, value: original.scroll)
             ]
             if let originalLayout {
-                restores.append(RestoreLayout(actionName: actionName, screen: screen, layout: originalLayout))
+                restores.append(RestoreLayout(actionName: actionName, screen: screen, changes: originalLayout))
             }
             commands.append(CompositeCommand(actionName: actionName, commands: restores))
         }

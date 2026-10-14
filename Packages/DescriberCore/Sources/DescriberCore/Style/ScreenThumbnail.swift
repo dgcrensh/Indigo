@@ -50,8 +50,8 @@ public struct ScreenThumbnail: Hashable, Sendable {
         }
         let layout = ScrollLayout(screen: screen)
         var regions: [Region] = []
-        for region in screen.allRegions {
-            guard let visible = layout.visibleFrame(of: region.id) else { continue }
+        for (position, region) in layout.index.regions.enumerated() {
+            guard let visible = layout.visibleFrame(at: position) else { continue }
             let w = Double(visible.w) * scale
             let h = Double(visible.h) * scale
             guard w >= minimumSize, h >= minimumSize else { continue }

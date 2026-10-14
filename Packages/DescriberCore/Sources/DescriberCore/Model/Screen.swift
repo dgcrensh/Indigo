@@ -30,7 +30,7 @@ public final class Screen {
 
     /// Every region on the screen, depth first in sibling order.
     public var allRegions: [Region] {
-        regions.flatMap(\.subtree)
+        Region.depthFirst(regions)
     }
 
     /// A deep copy with the same IDs.

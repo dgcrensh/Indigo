@@ -39,19 +39,20 @@ public struct CreateRegion: Command {
 
     public func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
-        let index = RegionIndex(screen: screen)
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        let index = layout.index
         let frame = grid.map { Snapping.snap(frame: self.frame, grid: $0, mode: .draw) } ?? self.frame
         guard Geometry.meetsMinimumSize(frame) else { throw EditError.belowMinimumSize(frame) }
         guard !index.contains(id) else { throw EditError.regionAlreadyExists(id) }
         if let parent, !index.contains(parent) { throw EditError.regionNotFound(parent) }
 
-        let before = RegionLayout(screen: screen)
         let placement =
             parent.map { Parenting.Placement(parent: $0, frame: frame) }
-            ?? Parenting.placement(forDrawn: frame, excluding: nil, in: screen, offsets: scrollOffsets)
+            ?? Parenting.placement(forDrawn: frame, excluding: nil, layout: layout)
         let region = Region(id: id, title: title, kind: kind, frame: placement.frame)
-        Parenting.attach(region, toParent: placement.parent, in: screen)
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        var changes = LayoutChanges()
+        Parenting.attach(region, toParent: placement.parent.flatMap(index.region), in: screen, recording: &changes)
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
     }
 }
 
@@ -84,27 +85,27 @@ public struct MoveRegions: Command {
 
     public func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
-        let index = RegionIndex(screen: screen)
+        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        let index = layout.index
         let roots = try topmostRegions(regions, in: index)
         guard let first = roots.first else { throw EditError.nothingToDo }
 
-        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
         let delta = Self.snappedDelta(
             moving: layout.drawnFrame(of: first.id) ?? first.frame, dx: dx, dy: dy, grid: grid)
         // A region nobody can see keeps its scrolling parent, so nudging a hidden region doesn't move it out.
         let hidden = Set(roots.filter { layout.visibleFrame(of: $0.id) == nil }.map(\.id))
 
-        let before = RegionLayout(screen: screen)
+        var changes = LayoutChanges()
         for root in roots {
-            for region in root.subtree {
+            guard let position = index.position(of: root.id) else { continue }
+            for region in index.regions[position...index[position: position].subtreeEnd] {
+                changes.recordFrame(of: region)
                 region.frame = region.frame.offsetBy(dx: delta.x, dy: delta.y)
             }
         }
-        for root in roots {
-            Parenting.reparentAfterChange(
-                of: root.id, in: screen, offsets: scrollOffsets, keepingParent: hidden.contains(root.id))
-        }
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        Parenting.place(
+            roots.map(\.id), in: screen, offsets: scrollOffsets, keepingParents: hidden, recording: &changes)
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
     }
 
     /// The delta that moves `frame` by `dx`, `dy` and then lands its origin on the grid, or the delta itself when
@@ -149,11 +150,12 @@ public struct ResizeRegion: Command {
         let frame = grid.map { Snapping.snap(frame: self.frame, grid: $0, mode: .resize(edges)) } ?? self.frame
         guard Geometry.meetsMinimumSize(frame) else { throw EditError.belowMinimumSize(frame) }
 
-        let before = RegionLayout(screen: screen)
+        var changes = LayoutChanges()
         let shift = layout.contentShift(of: layout.index[region]?.parent)
+        changes.recordFrame(of: target)
         target.frame = frame.offsetBy(dx: shift.x, dy: shift.y)
-        Parenting.reparentAfterChange(of: region, in: screen, offsets: scrollOffsets)
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        Parenting.place([region], in: screen, offsets: scrollOffsets, recording: &changes)
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
     }
 }
 
@@ -175,11 +177,11 @@ public struct DeleteRegions: Command {
         let roots = try topmostRegions(regions, in: index)
         guard !roots.isEmpty else { throw EditError.nothingToDo }
 
-        let before = RegionLayout(screen: screen)
+        var changes = LayoutChanges()
         for root in roots {
-            Parenting.detach(root.id, in: screen, index: index)
+            Parenting.detach(root.id, in: screen, index: index, recording: &changes)
         }
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
     }
 }
 
@@ -209,7 +211,8 @@ public struct ReorderRegion: Command {
         let index = RegionIndex(screen: screen)
         guard let target = index.region(region) else { throw EditError.regionNotFound(region) }
 
-        let before = RegionLayout(screen: screen)
+        var changes = LayoutChanges()
+        changes.recordSiblings(of: index.parent(of: region), in: screen)
         func reorder(_ siblings: inout [Region]) {
             siblings.removeAll { $0.id == region }
             if position == .front {
@@ -223,7 +226,7 @@ public struct ReorderRegion: Command {
         } else {
             reorder(&screen.regions)
         }
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
     }
 }
 
@@ -254,17 +257,21 @@ public struct ReorderRegions: Command {
             let staying = siblings.filter { !selected.contains($0.id) }
             return position == .front ? staying + moving : moving + staying
         }
-        let lists = [screen.regions] + screen.allRegions.map(\.children)
+        let lists = [screen.regions] + index.regions.map(\.children)
         guard lists.contains(where: { reordered($0).map(\.id) != $0.map(\.id) }) else {
             throw EditError.nothingToDo
         }
 
-        let before = RegionLayout(screen: screen)
-        for region in screen.allRegions where region.children.contains(where: { selected.contains($0.id) }) {
+        var changes = LayoutChanges()
+        for region in index.regions where region.children.contains(where: { selected.contains($0.id) }) {
+            changes.recordSiblings(of: region, in: screen)
             region.children = reordered(region.children)
         }
-        screen.regions = reordered(screen.regions)
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        if screen.regions.contains(where: { selected.contains($0.id) }) {
+            changes.recordSiblings(of: nil, in: screen)
+            screen.regions = reordered(screen.regions)
+        }
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
     }
 }
 
@@ -303,14 +310,19 @@ public struct PasteRegions: Command {
         if let parent, !index.contains(parent) { throw EditError.regionNotFound(parent) }
         guard !pasted.isEmpty else { throw EditError.nothingToDo }
 
-        let before = RegionLayout(screen: screen)
-        for region in pasted {
-            Parenting.attach(region, toParent: parent, in: screen)
-            if parent == nil {
-                Parenting.place(region.id, in: screen, offsets: scrollOffsets)
-            }
+        if let parent = parent.flatMap(index.region) {
+            var changes = LayoutChanges()
+            changes.recordSiblings(of: parent, in: screen)
+            parent.children.append(contentsOf: pasted)
+            return RestoreLayout(actionName: actionName, screen: self.screen, changes: changes)
         }
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+        // Each copy lands on top of the screen and is placed before the next is added, against one layout.
+        var placer = Parenting.Placer(screen: screen, offsets: scrollOffsets)
+        for region in pasted {
+            placer.attachTopLevel(region)
+            placer.place(region.id)
+        }
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: placer.changes)
     }
 }
 
@@ -357,14 +369,14 @@ public struct SetRegionScroll: Command {
 
     public func apply(to project: Project) throws -> Command {
         guard let (target, screen) = project.region(withID: region) else { throw EditError.regionNotFound(region) }
-        let before = RegionLayout(screen: screen)
         let old = target.scroll
         target.scroll = scroll
-        Parenting.replaceChildrenOutsideContent(of: target, in: screen, offsets: scrollOffsets)
+        var changes = LayoutChanges()
+        Parenting.replaceChildrenOutsideContent(of: target, in: screen, offsets: scrollOffsets, recording: &changes)
         return CompositeCommand(
             actionName: actionName,
             commands: [
-                RestoreLayout(actionName: actionName, screen: screen.id, layout: before),
+                RestoreLayout(actionName: actionName, screen: screen.id, changes: changes),
                 SetRegionValue(actionName: actionName, region: region, keyPath: \.scroll, value: old),
             ])
     }
@@ -379,7 +391,5 @@ func topmostRegions(_ ids: [RegionID], in index: RegionIndex) throws -> [Region]
         guard let region = index.region(id) else { throw EditError.regionNotFound(id) }
         regions.append(region)
     }
-    return regions.filter { region in
-        !index.path(to: region.id).dropLast().contains { seen.contains($0.id) }
-    }
+    return regions.filter { !index.isInside($0.id, anyOf: seen) }
 }

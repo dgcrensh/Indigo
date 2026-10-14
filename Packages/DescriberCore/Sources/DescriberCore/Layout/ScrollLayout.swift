@@ -22,8 +22,11 @@ public struct ScrollLayout {
         let contentShift: ScrollOffset
     }
 
-    public let index: RegionIndex
-    private var entries: [RegionID: Entry] = [:]
+    public private(set) var index: RegionIndex
+    /// In the same positions as `index.regions`.
+    private var entries: [Entry] = []
+    /// The offsets the layout was built with, before clamping.
+    private let saved: [RegionID: ScrollOffset]
     /// The offset of every region scrolled away from its origin, clamped.
     public private(set) var offsets: [RegionID: ScrollOffset] = [:]
 
@@ -31,10 +34,20 @@ public struct ScrollLayout {
     /// past the end of their content, are clamped.
     public init(screen: Screen, offsets: [RegionID: ScrollOffset] = [:]) {
         index = RegionIndex(screen: screen)
-        add(screen.regions, shift: .zero, clip: nil, saved: offsets)
+        saved = offsets
+        entries.reserveCapacity(index.regions.count)
+        add(screen.regions, shift: .zero, clip: nil)
     }
 
-    private mutating func add(_ regions: [Region], shift: ScrollOffset, clip: Frame?, saved: [RegionID: ScrollOffset]) {
+    /// Adds `region` and its subtree as the last top-level region, as appending it to the screen's regions and
+    /// building a new layout would. A top-level region has no shift or clip, so nothing else moves.
+    mutating func appendTopLevel(_ region: Region) {
+        index.appendTopLevel(region)
+        add([region], shift: .zero, clip: nil)
+    }
+
+    /// Walks in draw order, so each entry lands at its region's position in `index`.
+    private mutating func add(_ regions: [Region], shift: ScrollOffset, clip: Frame?) {
         for region in regions {
             let drawn = region.frame.offsetBy(dx: -shift.x, dy: -shift.y)
             var contentShift = shift
@@ -47,9 +60,13 @@ public struct ScrollLayout {
                 contentShift = ScrollOffset(x: shift.x + offset.x, y: shift.y + offset.y)
                 childClip = clip.map { $0.intersection(drawn) ?? Frame(x: drawn.x, y: drawn.y, w: 0, h: 0) } ?? drawn
             }
-            entries[region.id] = Entry(drawn: drawn, clip: clip, contentShift: contentShift)
-            add(region.children, shift: contentShift, clip: childClip, saved: saved)
+            entries.append(Entry(drawn: drawn, clip: clip, contentShift: contentShift))
+            add(region.children, shift: contentShift, clip: childClip)
         }
+    }
+
+    private func entry(_ id: RegionID) -> Entry? {
+        index.position(of: id).map { entries[$0] }
     }
 
     // MARK: Offsets
@@ -91,31 +108,45 @@ public struct ScrollLayout {
 
     /// Where the canvas draws `id`, in screen points.
     public func drawnFrame(of id: RegionID) -> Frame? {
-        entries[id]?.drawn
+        entry(id)?.drawn
+    }
+
+    /// Where the canvas draws the region at draw order `position`.
+    func drawnFrame(at position: Int) -> Frame {
+        entries[position].drawn
     }
 
     /// The rectangle `id` is clipped to, or nil when no scrolling region is around it. A clip with no area hides it.
     public func clip(of id: RegionID) -> Frame? {
-        entries[id]?.clip
+        entry(id)?.clip
     }
 
     /// The part of `id` that shows: its drawn frame inside its clip. Nil when it is entirely clipped away.
     public func visibleFrame(of id: RegionID) -> Frame? {
-        guard let entry = entries[id] else { return nil }
+        index.position(of: id).flatMap(visibleFrame(at:))
+    }
+
+    /// The part of the region at draw order `position` that shows.
+    func visibleFrame(at position: Int) -> Frame? {
+        let entry = entries[position]
         guard let clip = entry.clip else { return entry.drawn }
         return entry.drawn.intersection(clip)
     }
 
     /// What the frames of `parent`'s children are moved by where they are drawn; zero for the top level.
     public func contentShift(of parent: RegionID?) -> ScrollOffset {
-        parent.flatMap { entries[$0]?.contentShift } ?? .zero
+        parent.flatMap { entry($0)?.contentShift } ?? .zero
     }
 
     /// `id`'s content area where it is drawn at its scroll position: the frame for a region that doesn't scroll.
     public func drawnContentArea(of id: RegionID) -> Frame? {
-        guard let region = index.region(id), let entry = entries[id] else { return nil }
-        let shift = entry.contentShift
-        return region.contentArea.offsetBy(dx: -shift.x, dy: -shift.y)
+        index.position(of: id).map(drawnContentArea(at:))
+    }
+
+    /// The content area of the region at draw order `position` where it is drawn.
+    func drawnContentArea(at position: Int) -> Frame {
+        let shift = entries[position].contentShift
+        return index.regions[position].contentArea.offsetBy(dx: -shift.x, dy: -shift.y)
     }
 
     /// The frame in the file of a region drawn at `drawn` as a child of `parent` (nil for the top level).
@@ -128,7 +159,7 @@ public struct ScrollLayout {
     /// A previewed region is clipped only by previewed scrolling regions around it, so a region dragged out of
     /// scrolling content stays in view; any other region is drawn as usual.
     public func drawn(_ id: RegionID, previewing frames: [RegionID: Frame]) -> (frame: Frame, clip: Frame?)? {
-        guard let entry = entries[id] else { return nil }
+        guard let entry = entry(id) else { return nil }
         guard let frame = frames[id] else { return (entry.drawn, entry.clip) }
         var clip: Frame?
         for ancestor in index.path(to: id).dropLast() where ancestor.scroll != nil {
@@ -144,28 +175,29 @@ public struct ScrollLayout {
 
     /// The topmost region whose visible part contains `point`, edges included.
     public func region(at point: CGPoint) -> RegionID? {
-        index.regions.last { region in
-            visibleFrame(of: region.id)?.cgRect.containsIncludingEdges(point) ?? false
-        }?.id
+        index.regions.indices.last { position in
+            visibleFrame(at: position)?.cgRect.containsIncludingEdges(point) ?? false
+        }.map { index.regions[$0].id }
     }
 
     /// Every region whose visible part `rect` overlaps, in draw order. A rectangle with no area touches nothing.
     public func regions(touching rect: CGRect) -> [RegionID] {
         let rect = rect.standardized
         guard rect.width > 0, rect.height > 0 else { return [] }
-        return index.regions.filter { region in
-            visibleFrame(of: region.id)?.cgRect.intersects(rect) ?? false
-        }.map(\.id)
+        return index.regions.indices.filter { position in
+            visibleFrame(at: position)?.cgRect.intersects(rect) ?? false
+        }.map { index.regions[$0].id }
     }
 
     /// The region two-finger scroll over `point` scrolls (spec Section 5): the topmost of `selection` that has
     /// content to scroll and whose visible part contains the point. Nil means the canvas pans.
     public func scrollTarget(at point: CGPoint, among selection: [RegionID]) -> RegionID? {
         let selected = Set(selection)
-        return index.regions.last { region in
-            selected.contains(region.id) && canScroll(region.id)
-                && visibleFrame(of: region.id)?.cgRect.containsIncludingEdges(point) == true
-        }?.id
+        return index.regions.indices.last { position in
+            let region = index.regions[position]
+            return selected.contains(region.id) && Self.maximumOffset(of: region) != .zero
+                && visibleFrame(at: position)?.cgRect.containsIncludingEdges(point) == true
+        }.map { index.regions[$0].id }
     }
 
     // MARK: Indicators

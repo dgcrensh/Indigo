@@ -199,6 +199,76 @@ final class CommandTests: XCTestCase {
         XCTAssertTrue(outer.children[0] === inner)
     }
 
+    /// Twenty random region commands on a random screen, then undo all of them and redo all of them: the bytes come
+    /// back to the start and then to the end, with the same region objects throughout.
+    func testRandomCommandsUndoAndRedoToTheSameBytes() throws {
+        for seed in UInt64(0)..<100 {
+            let subject = RandomScreen(seed: seed)
+            let screen = subject.screen
+            var random = SeededGenerator(seed: seed &+ 2_000_000)
+            let session = EditSession(project: subject.project)
+            let start = Fixtures.bytes(subject.project)
+            let startRegions = screen.allRegions
+            for _ in 0..<20 {
+                guard let command = Self.randomRegionCommand(on: subject, using: &random) else { continue }
+                try? session.perform(command)
+            }
+            let end = Fixtures.bytes(subject.project)
+            let endRegions = screen.allRegions
+            let steps = session.undoDepth
+            XCTAssertGreaterThan(steps, 10, "seed \(seed)")
+
+            for _ in 0..<steps {
+                try session.undo()
+            }
+            XCTAssertEqual(Fixtures.bytes(subject.project), start, "undo all, seed \(seed)")
+            XCTAssertTrue(zip(screen.allRegions, startRegions).allSatisfy(===), "undo identity, seed \(seed)")
+            for _ in 0..<steps {
+                try session.redo()
+            }
+            XCTAssertEqual(Fixtures.bytes(subject.project), end, "redo all, seed \(seed)")
+            XCTAssertTrue(zip(screen.allRegions, endRegions).allSatisfy(===), "redo identity, seed \(seed)")
+        }
+    }
+
+    private static func randomRegionCommand(on subject: RandomScreen, using random: inout SeededGenerator) -> Command? {
+        let screen = subject.screen
+        let all = screen.allRegions
+        guard let region = all.randomElement(using: &random) else { return nil }
+        let some = (0..<random.int(1...8)).map { _ in all.randomElement(using: &random)!.id }
+        let offsets = subject.offsets
+        switch random.int(0...8) {
+        case 0:
+            return CreateRegion(
+                screen: screen.id, frame: RandomScreen.frame(in: region.frame, using: &random), scrollOffsets: offsets)
+        case 1:
+            return MoveRegions(
+                screen: screen.id, regions: some, dx: random.int(-200...200), dy: random.int(-200...200),
+                scrollOffsets: offsets)
+        case 2:
+            let frame = region.frame
+            return ResizeRegion(
+                screen: screen.id, region: region.id,
+                frame: Frame(x: frame.x, y: frame.y, w: random.int(4...frame.w + 40), h: random.int(4...frame.h + 40)),
+                scrollOffsets: offsets)
+        case 3:
+            return DeleteRegions(screen: screen.id, regions: some)
+        case 4:
+            return ReorderRegion(screen: screen.id, region: region.id, to: random.chance(0.5) ? .front : .back)
+        case 5:
+            return ReorderRegions(screen: screen.id, regions: some, to: random.chance(0.5) ? .front : .back)
+        case 6:
+            return PasteRegions(
+                screen: screen.id, regions: some.compactMap { id in all.first { $0.id == id } },
+                parent: random.chance(0.3) ? region.id : nil, scrollOffsets: offsets)
+        case 7:
+            let scroll = random.chance(0.5) ? nil : Scroll(axis: .vertical, contentWidth: 4, contentHeight: 4)
+            return RegionCommands.setScroll(scroll?.clamped(to: region.frame), of: region.id, scrollOffsets: offsets)
+        default:
+            return RegionCommands.setTitle("Edited \(random.int(0...999))", of: region.id)
+        }
+    }
+
     // MARK: Region commands
 
     func testCreateOrResizeBelowMinimumSizeIsRejectedAndChangesNothing() {

@@ -17,7 +17,7 @@ public struct RegionClipboard {
         let index = RegionIndex(screen: screen)
         let selected = Set(selection)
         let roots = index.regions.filter { region in
-            selected.contains(region.id) && !index.path(to: region.id).dropLast().contains { selected.contains($0.id) }
+            selected.contains(region.id) && !index.isInside(region.id, anyOf: selected)
         }
         guard !roots.isEmpty else { return nil }
         sourceScreen = screen.id
