@@ -129,6 +129,22 @@ final class CanvasPerformanceTests: XCTestCase {
         XCTAssertEqual(box.frame, CGRect(x: 32, y: 32, width: 680, height: 600))
     }
 
+    @MainActor
+    func testPanningMovesTheGridWithoutDrawingItAgain() throws {
+        let (canvas, _) = try makeCanvas()
+        canvas.camera = Camera(zoom: 1.5)
+        let image = try XCTUnwrap(canvas.gridRowImage)
+        let count = canvas.gridDotCount
+        XCTAssertGreaterThan(count, 0)
+        for offset in stride(from: 1.0, through: 60, by: 3.7) {
+            canvas.camera = Camera(zoom: 1.5, panX: offset, panY: -offset / 2)
+            XCTAssertTrue(canvas.gridRowImage === image, "a pan only moves the rows")
+            XCTAssertEqual(canvas.gridDotCount, count)
+        }
+        canvas.camera = Camera(zoom: 3)
+        XCTAssertFalse(canvas.gridRowImage === image, "a zoom draws the row for the new spacing")
+    }
+
     // MARK: Gestures (milestone 12)
 
     /// A window on a document holding the 500-region stress project, with its canvas the size the timings assume.

@@ -84,6 +84,52 @@ final class CanvasLayoutTests: XCTestCase {
         XCTAssertEqual(GridLines.positions(from: 10, to: 0, grid: 8), [])
     }
 
+    func testGridTilingStartsAtTheLastLineBeforeTheView() throws {
+        let tiling = try XCTUnwrap(
+            GridTiling(
+                grid: 8, camera: Camera(zoom: 2, panX: 13, panY: -3), viewSize: CGSize(width: 100, height: 50),
+                minimumSpacing: 10))
+        XCTAssertEqual(tiling.step, 8)
+        XCTAssertEqual(tiling.spacing, 16)
+        // Lines at x = 8 and y = -8, drawn at (8 − 13) × 2 and (−8 + 3) × 2.
+        XCTAssertEqual(tiling.originX, -10)
+        XCTAssertEqual(tiling.originY, -10)
+        XCTAssertEqual(tiling.columns, 9)
+        XCTAssertEqual(tiling.rows, 6)
+        XCTAssertGreaterThanOrEqual(tiling.originX + Double(tiling.columns - 1) * tiling.spacing, 100)
+        XCTAssertGreaterThanOrEqual(tiling.originY + Double(tiling.rows - 1) * tiling.spacing, 50)
+    }
+
+    func testGridTilingPutsALineOnTheEdgeAtZero() throws {
+        let tiling = try XCTUnwrap(
+            GridTiling(
+                grid: 8, camera: Camera(zoom: 1, panX: 16, panY: 0), viewSize: CGSize(width: 64, height: 64),
+                minimumSpacing: 6))
+        XCTAssertEqual(tiling.originX, 0)
+        XCTAssertEqual(tiling.originY, 0)
+    }
+
+    func testPanningMovesTheGridTilingWithoutChangingItsCounts() throws {
+        let size = CGSize(width: 1440, height: 900)
+        let base = try XCTUnwrap(GridTiling(grid: 8, camera: Camera(zoom: 1.37), viewSize: size, minimumSpacing: 10))
+        for offset in stride(from: -40.0, through: 40, by: 0.7) {
+            let camera = Camera(zoom: 1.37, panX: offset, panY: offset * 3)
+            let tiling = try XCTUnwrap(GridTiling(grid: 8, camera: camera, viewSize: size, minimumSpacing: 10))
+            XCTAssertEqual(tiling.columns, base.columns)
+            XCTAssertEqual(tiling.rows, base.rows)
+            XCTAssertEqual(tiling.spacing, base.spacing)
+            XCTAssertLessThanOrEqual(tiling.originX, 0)
+            XCTAssertGreaterThan(tiling.originX, -tiling.spacing)
+            XCTAssertLessThanOrEqual(tiling.originY, 0)
+            XCTAssertGreaterThan(tiling.originY, -tiling.spacing)
+        }
+    }
+
+    func testGridTilingIsNilWithNothingToDraw() {
+        XCTAssertNil(GridTiling(grid: 8, camera: Camera(), viewSize: .zero, minimumSpacing: 10))
+        XCTAssertNil(GridTiling(grid: 0, camera: Camera(), viewSize: CGSize(width: 10, height: 10), minimumSpacing: 10))
+    }
+
     func testGridLinesThinOutWhenTooClose() {
         XCTAssertEqual(GridLines.drawnStep(grid: 8, zoom: 1), 8)
         XCTAssertEqual(GridLines.drawnStep(grid: 8, zoom: 0.75), 8)  // exactly 6 points apart

@@ -118,7 +118,7 @@ step can be timed against `main`.
    (they equal the end), for at least 100 seeds.
 5. **Timings.** `CorePerformanceTests` adds: select-all move (perform and undo), resizing a container so its rows
    fall out, pasting a copy of 24 containers, and a select-all move on a 5,000-region stress project, each printed
-   like the existing lines. Budgets stay loose (50 ms at 500 regions, 500 ms at 5,000) so a slow runner or a debug
+   like the existing lines. Budgets stay loose (50 ms at 500 regions, 1,500 ms at 5,000) so a slow runner or a debug
    build doesn't fail them; the targets below are read from the printed times.
 
 ## Done when

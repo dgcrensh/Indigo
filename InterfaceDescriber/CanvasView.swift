@@ -105,10 +105,16 @@ final class CanvasView: NSView {
     /// screen.
     private let boundsLayer = CALayer()
     private let viewportOutline = CAShapeLayer()
-    /// The grid's dots: one dot, repeated along a row, and the row repeated down the view.
-    private let gridLayer = CAReplicatorLayer()
-    private let gridRow = CAReplicatorLayer()
-    private let gridDot = CALayer()
+    /// The grid's dots, clipped to the view: one image of a row of dots, repeated down the view. A pan only moves the
+    /// rows; the image is drawn again only when the spacing, the view's width, the color or the scale changes.
+    private let gridLayer = CALayer()
+    private let gridRows = CAReplicatorLayer()
+    private let gridRow = CALayer()
+    /// The image of one row of grid dots, and what it was drawn for, so it is only drawn again when that changes.
+    private(set) var gridRowImage: CGImage?
+    private var gridRowImageKey: GridRowImageKey?
+    /// How the grid is tiled now, or nil while it is hidden.
+    private var gridTiling: GridTiling?
     /// The regions' boxes in z-order, in zoomed screen coordinates; its position is the screen origin in the view.
     let regionsLayer = CALayer()
     /// Above the regions, in the same coordinates: the region being drawn, the marquee, and the resize handles.
@@ -162,7 +168,7 @@ final class CanvasView: NSView {
     }
 
     private func setUpLayers() {
-        for layer in [stage, boundsLayer, viewportOutline, gridLayer, gridRow, gridDot, regionsLayer, overlayLayer] {
+        for layer in [stage, boundsLayer, viewportOutline, gridLayer, gridRows, gridRow, regionsLayer, overlayLayer] {
             layer.anchorPoint = .zero
         }
         for layer in [newRegionLayer, marqueeLayer] {
@@ -193,10 +199,11 @@ final class CanvasView: NSView {
         // The stage's geometry is flipped, so a positive offset is downwards.
         boundsLayer.shadowOffset = CGSize(width: 0, height: PaperShapes.shadowOffset)
         boundsLayer.addSublayer(viewportOutline)
-        gridDot.frame = CGRect(x: 0, y: 0, width: Self.gridDotSize, height: Self.gridDotSize)
-        gridDot.cornerRadius = Self.gridDotSize / 2
-        gridRow.addSublayer(gridDot)
-        gridLayer.addSublayer(gridRow)
+        gridLayer.masksToBounds = true
+        // The image's width is rounded up to whole pixels, so it is drawn at its own size rather than stretched.
+        gridRow.contentsGravity = .left
+        gridRows.addSublayer(gridRow)
+        gridLayer.addSublayer(gridRows)
         gridLayer.isHidden = true
         emptyLabel.string = "No screen"
         emptyLabel.font = PaperFont.rounded(ofSize: 13, weight: .medium)
@@ -253,7 +260,7 @@ final class CanvasView: NSView {
         boundsLayer.borderColor = colors.sheetBorder
         boundsLayer.shadowColor = colors.sheetShadow
         viewportOutline.strokeColor = colors.viewportLine
-        gridDot.backgroundColor = colors.gridDot
+        layoutGrid()
         emptyLabel.foregroundColor = colors.emptyText
         emptyLabel.contentsScale = scale
         for layers in regionLayers.values {
@@ -633,37 +640,62 @@ final class CanvasView: NSView {
         !gridLayer.isHidden && gridDotCount > 0
     }
 
-    /// How many grid dots are drawn, for tests.
+    /// How many grid dots are drawn, including the ones just outside the view, for tests.
     var gridDotCount: Int {
-        gridLayer.isHidden ? 0 : gridLayer.instanceCount * gridRow.instanceCount
+        guard !gridLayer.isHidden, let gridTiling else { return 0 }
+        return gridTiling.columns * gridTiling.rows
     }
 
-    /// Places a dot at every visible grid intersection, as one dot repeated along a row and the row repeated down, so
-    /// panning and zooming only move and count them.
+    /// Tiles the grid's dots over the view, starting from the last line before its top-left corner. A pan changes
+    /// only where the rows start; a zoom, a resize, a new color or a new scale also draws the row image again.
     private func layoutGrid() {
-        guard screen != nil, let gridSize else {
+        guard screen != nil, let gridSize,
+            let tiling = GridTiling(
+                grid: gridSize, camera: camera, viewSize: bounds.size, minimumSpacing: Self.gridDotMinimumSpacing)
+        else {
+            gridTiling = nil
             gridLayer.isHidden = true
             return
         }
-        let step = GridLines.drawnStep(grid: gridSize, zoom: camera.zoom, minimumSpacing: Self.gridDotMinimumSpacing)
-        let visible = camera.visibleRect(viewSize: bounds.size)
-        let columns = GridLines.positions(from: visible.minX, to: visible.maxX, grid: step)
-        let rows = GridLines.positions(from: visible.minY, to: visible.maxY, grid: step)
-        guard let firstColumn = columns.first, let firstRow = rows.first else {
-            gridLayer.isHidden = true
-            return
-        }
-        let origin = camera.viewPoint(fromScreen: CGPoint(x: firstColumn, y: firstRow))
-        let spacing = Double(step) * camera.zoom
+        gridTiling = tiling
         let size = Self.gridDotSize
+        let spacing = CGFloat(tiling.spacing)
+        let rowWidth = CGFloat(tiling.columns - 1) * spacing + size
+        let key = GridRowImageKey(spacing: tiling.spacing, columns: tiling.columns, color: colors.gridDot, scale: scale)
+        if key != gridRowImageKey {
+            gridRowImage = Self.gridRowImage(
+                columns: tiling.columns, spacing: spacing, color: colors.gridDot, scale: scale)
+            gridRow.contents = gridRowImage
+            gridRow.contentsScale = scale
+            gridRowImageKey = key
+        }
         gridLayer.isHidden = false
         gridLayer.frame = CGRect(origin: .zero, size: bounds.size)
-        gridRow.frame = CGRect(origin: .zero, size: bounds.size)
-        gridDot.frame = CGRect(x: origin.x - size / 2, y: origin.y - size / 2, width: size, height: size)
-        gridRow.instanceCount = columns.count
-        gridRow.instanceTransform = CATransform3DMakeTranslation(spacing, 0, 0)
-        gridLayer.instanceCount = rows.count
-        gridLayer.instanceTransform = CATransform3DMakeTranslation(0, spacing, 0)
+        // Each dot is centered on its line, so the row starts half a dot before the first one.
+        gridRow.frame = CGRect(x: -size / 2, y: -size / 2, width: rowWidth, height: size)
+        gridRows.frame = CGRect(
+            x: tiling.originX, y: tiling.originY, width: Double(rowWidth), height: Double(tiling.rows) * tiling.spacing)
+        gridRows.instanceCount = tiling.rows
+        gridRows.instanceTransform = CATransform3DMakeTranslation(0, spacing, 0)
+    }
+
+    /// A row of `columns` dots `gridDotSize` across and `spacing` apart, with no margin around them.
+    private static func gridRowImage(columns: Int, spacing: CGFloat, color: CGColor, scale: CGFloat) -> CGImage? {
+        let size = gridDotSize
+        let width = CGFloat(columns - 1) * spacing + size
+        guard
+            let space = CGColorSpace(name: CGColorSpace.sRGB),
+            let context = CGContext(
+                data: nil, width: Int((width * scale).rounded(.up)), height: Int((size * scale).rounded(.up)),
+                bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.scaleBy(x: scale, y: scale)
+        context.setFillColor(color)
+        for column in 0..<columns {
+            context.fillEllipse(in: CGRect(x: CGFloat(column) * spacing, y: 0, width: size, height: size))
+        }
+        return context.makeImage()
     }
 
     private func withoutAnimation(_ changes: () -> Void) {
@@ -831,4 +863,12 @@ private struct DrawnRegion: Equatable {
         frame = layout.drawnFrame(of: id) ?? Frame(x: 0, y: 0, w: 0, h: 0)
         clip = layout.clip(of: id)
     }
+}
+
+/// What the grid's row image was drawn for.
+private struct GridRowImageKey: Equatable {
+    var spacing: Double
+    var columns: Int
+    var color: CGColor
+    var scale: CGFloat
 }
