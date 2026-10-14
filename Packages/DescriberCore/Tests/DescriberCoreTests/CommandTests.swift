@@ -269,6 +269,136 @@ final class CommandTests: XCTestCase {
         }
     }
 
+    // MARK: Affected screens
+
+    /// Each screen's file as it is encoded now.
+    private static func screenFiles(_ project: Project) -> [ScreenID: Data] {
+        Dictionary(
+            uniqueKeysWithValues: project.screens.map {
+                ($0.id, OrderedJSONWriter.data(ProjectEncoding.screen($0, in: project)))
+            })
+    }
+
+    /// The screens whose files differ between `before` and `after`, or nil when screens came or went.
+    private static func changedScreens(_ before: [ScreenID: Data], _ after: [ScreenID: Data]) -> Set<ScreenID>? {
+        guard Set(before.keys) == Set(after.keys) else { return nil }
+        return Set(before.keys.filter { before[$0] != after[$0] })
+    }
+
+    /// Every region command's inverse, and the inverse of that, name exactly the screen whose file changed. A region
+    /// command that knows its screen names it before it is applied too.
+    func testEveryRegionCommandAndItsInverseNameTheScreenTheyChange() throws {
+        for command in Self.regionCommands {
+            let project = AcmeExample.make()
+            let before = Self.screenFiles(project)
+            let inverse = try command.apply(to: project)
+            let changed = try XCTUnwrap(Self.changedScreens(before, Self.screenFiles(project)))
+            XCTAssertEqual(changed.count, 1, command.actionName)
+            XCTAssertEqual(inverse.affectedScreens, .screens(changed), command.actionName)
+            if command.affectedScreens != .all {
+                XCTAssertEqual(command.affectedScreens, .screens(changed), command.actionName)
+            }
+            XCTAssertEqual(try inverse.apply(to: project).affectedScreens, .screens(changed), command.actionName)
+        }
+    }
+
+    /// Commands that find their region by ID alone learn its screen when applied.
+    func testCommandsThatFindTheirRegionByIDNameItsScreenOnceApplied() throws {
+        let list = RegionID("9be4bcfc-49b6-4a08-b2e6-cc3ababced20")
+        for command in [
+            RegionCommands.setTitle("Renamed", of: list), RegionCommands.setScroll(nil, of: list),
+        ] {
+            XCTAssertEqual(command.affectedScreens, .all, command.actionName)
+            let inverse = try command.apply(to: AcmeExample.make())
+            XCTAssertEqual(inverse.affectedScreens, .screen(AcmeExample.settings), command.actionName)
+        }
+    }
+
+    /// Commands that only change one screen's own fields name it; renames and anything that adds, removes,
+    /// reorders or groups screens say every screen, as do their inverses. Whatever a screen command says covers the
+    /// files that changed.
+    func testScreenCommandsNameTheirScreenOrEveryScreen() throws {
+        let own: [Command] = [
+            ScreenCommands.setKind(.sheet, of: AcmeExample.resetPassword),
+            ScreenCommands.setViewport(Viewport(width: 100, height: 100), of: AcmeExample.resetPassword),
+            ScreenCommands.setScroll(Scroll(axis: .both, contentWidth: 1, contentHeight: 1), of: AcmeExample.login),
+        ]
+        for command in Self.screenCommands {
+            let project = AcmeExample.make()
+            let before = Self.screenFiles(project)
+            let inverse = try command.apply(to: project)
+            let changed = Self.changedScreens(before, Self.screenFiles(project))
+            if let index = own.firstIndex(where: { $0.actionName == command.actionName }) {
+                let expected = own[index].affectedScreens
+                XCTAssertNotEqual(expected, .all, command.actionName)
+                XCTAssertEqual(command.affectedScreens, expected, command.actionName)
+                XCTAssertEqual(inverse.affectedScreens, expected, command.actionName)
+                XCTAssertEqual(changed.map(AffectedScreens.screens), expected, command.actionName)
+            } else {
+                XCTAssertEqual(command.affectedScreens, .all, command.actionName)
+                XCTAssertEqual(inverse.affectedScreens, .all, command.actionName)
+            }
+        }
+    }
+
+    func testACompositeNamesTheScreensOfItsCommands() {
+        let composite = CompositeCommand(
+            actionName: "Both",
+            commands: [
+                DeleteRegions(screen: AcmeExample.login, regions: []),
+                DeleteRegions(screen: AcmeExample.settings, regions: []),
+            ])
+        XCTAssertEqual(composite.affectedScreens, .screens([AcmeExample.login, AcmeExample.settings]))
+        let withRename = CompositeCommand(
+            actionName: "Both", commands: composite.commands + [ScreenCommands.rename(AcmeExample.login, to: "In")])
+        XCTAssertEqual(withRename.affectedScreens, .all)
+    }
+
+    // MARK: Generations
+
+    func testTheSessionCountsChangesPerScreen() throws {
+        let project = AcmeExample.make()
+        let session = EditSession(project: project)
+        let start = session.generations
+        let list = RegionID("9be4bcfc-49b6-4a08-b2e6-cc3ababced20")
+
+        try session.perform(MoveRegions(screen: AcmeExample.settings, regions: [list], dx: 4, dy: 0))
+        let moved = session.generations
+        XCTAssertNotEqual(moved.stamp(for: AcmeExample.settings), start.stamp(for: AcmeExample.settings))
+        XCTAssertEqual(moved.stamp(for: AcmeExample.login), start.stamp(for: AcmeExample.login))
+
+        // An ID-only command counts against the screen it found.
+        _ = try session.applyWithoutRecording(RegionCommands.setTitle("Renamed", of: list))
+        XCTAssertEqual(session.generations.stamp(for: AcmeExample.login), start.stamp(for: AcmeExample.login))
+        XCTAssertEqual(session.generations.project, moved.project + 1)
+
+        // A failed command counts nothing.
+        let beforeFailure = session.generations
+        XCTAssertThrowsError(try session.perform(DeleteRegions(screen: AcmeExample.login, regions: [list])))
+        XCTAssertEqual(session.generations, beforeFailure)
+
+        try session.undo()
+        XCTAssertNotEqual(
+            session.generations.stamp(for: AcmeExample.settings), beforeFailure.stamp(for: AcmeExample.settings))
+        XCTAssertEqual(session.generations.stamp(for: AcmeExample.login), start.stamp(for: AcmeExample.login))
+
+        // A rename counts against every screen, and so does its undo.
+        try session.perform(ScreenCommands.rename(AcmeExample.resetPassword, to: "Recover"))
+        let renamed = session.generations
+        XCTAssertNotEqual(renamed.stamp(for: AcmeExample.login), start.stamp(for: AcmeExample.login))
+        try session.undo()
+        XCTAssertNotEqual(session.generations.stamp(for: AcmeExample.login), renamed.stamp(for: AcmeExample.login))
+        try session.redo()
+        XCTAssertEqual(session.generations.project, renamed.project + 2)
+    }
+
+    func testStampsFromDifferentSessionsNeverMatch() {
+        let project = AcmeExample.make()
+        XCTAssertNotEqual(
+            EditSession(project: project).generations.stamp(for: AcmeExample.login),
+            EditSession(project: project).generations.stamp(for: AcmeExample.login))
+    }
+
     // MARK: Region commands
 
     func testCreateOrResizeBelowMinimumSizeIsRejectedAndChangesNothing() {

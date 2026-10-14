@@ -154,6 +154,40 @@ final class CorePerformanceTests: XCTestCase {
         XCTAssertLessThan(cached, 500)
     }
 
+    /// Milestone 23: autosave after one nudge on a 40-screen project of 300 regions each, with the encoding cache,
+    /// with and without the session's generations. With them, only the nudged screen is built and encoded.
+    func testWriteAfterANudgeOnFortyScreensWithinBudget() throws {
+        let large = Project.stressTest(regionCount: 300, screenCount: 40)
+        let session = EditSession(project: large)
+        let cache = PackageEncodingCache()
+        var tree = ProjectPackage.write(project: large, cache: cache, generations: session.generations).tree
+        var nudges = 0
+        /// Nudges a region on a different screen each time, then times only the write that follows.
+        func writeAfterNudge(_ name: String, generations: Bool) throws -> Double {
+            var elapsed: TimeInterval = 0
+            let iterations = 20
+            for _ in 0..<iterations {
+                nudges += 1
+                let screen = large.screens[(nudges * 7) % large.screens.count]
+                let region = try XCTUnwrap(screen.allRegions.last)
+                try session.perform(
+                    MoveRegions(screen: screen.id, regions: [region.id], dx: nudges % 2 == 0 ? 1 : -1, dy: 0))
+                let start = Date()
+                let result = ProjectPackage.write(
+                    project: large, previous: tree, cache: cache, generations: generations ? session.generations : nil)
+                elapsed += Date().timeIntervalSince(start)
+                XCTAssertEqual(result.changed.count, 1)
+                tree = ProjectPackage.applying(result.changes, to: tree)
+            }
+            let milliseconds = elapsed / Double(iterations) * 1000
+            print(String(format: "Core, 12000 regions, %@: %.3f ms", name, milliseconds))
+            return milliseconds
+        }
+        let without = try writeAfterNudge("write 40 screens after a nudge, cached", generations: false)
+        let with = try writeAfterNudge("write 40 screens after a nudge, cached with generations", generations: true)
+        XCTAssertLessThan(with, without / 5)
+    }
+
     func testSelectAllMoveOnFiveThousandRegionsWithinBudget() throws {
         let project = Project.stressTest(regionCount: 5000)
         let screen = try XCTUnwrap(project.screens.first)

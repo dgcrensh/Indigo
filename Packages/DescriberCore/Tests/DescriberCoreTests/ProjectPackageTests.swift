@@ -170,6 +170,93 @@ final class ProjectPackageTests: XCTestCase {
         }
     }
 
+    /// With generations, a screen no command touched isn't built again: a change made behind the session's back
+    /// doesn't reach the file, which shows the write skipped it. Without them, the change is written.
+    func testWritesWithGenerationsSkipScreensNoCommandTouched() throws {
+        let project = AcmeExample.make()
+        let session = EditSession(project: project)
+        let cache = PackageEncodingCache()
+        let first = ProjectPackage.write(project: project, cache: cache, generations: session.generations)
+        try session.perform(ScreenCommands.setKind(.sheet, of: AcmeExample.login))
+        try XCTUnwrap(project.screen(withID: AcmeExample.accountMenu)).regions[0].title = "Behind the session's back"
+
+        let skipping = ProjectPackage.write(
+            project: project, previous: first.tree, cache: cache, generations: session.generations)
+        XCTAssertEqual(skipping.changed, ["screens/login.json"])
+        let full = ProjectPackage.write(project: project, previous: first.tree, cache: cache)
+        XCTAssertEqual(full.changed, ["screens/login.json", "screens/account-menu.json"])
+    }
+
+    /// Milestone 23: random edits of every sort, written after each with one long-lived cache and the session's
+    /// generations, skipping untouched screens, and without either: the results are the same byte for byte.
+    func testWritesWithGenerationsMatchUncachedWritesAfterRandomEdits() throws {
+        for seed in UInt64(0)..<40 {
+            var random = SeededGenerator(seed: seed &+ 500)
+            let project = Project.stressTest(regionCount: 24, screenCount: 5)
+            let session = EditSession(project: project)
+            let cache = PackageEncodingCache()
+            var tree = ProjectPackage.write(project: project, cache: cache, generations: session.generations).tree
+            for step in 0..<40 {
+                if random.chance(0.75) {
+                    try applyRandomEdit(to: session, using: &random)
+                } else {
+                    try applyOtherRandomEdit(to: session, using: &random)
+                }
+                let skipping = ProjectPackage.write(
+                    project: project, previous: tree, cache: cache, generations: session.generations)
+                let uncached = ProjectPackage.write(project: project, previous: tree)
+                XCTAssertEqual(skipping, uncached, "seed \(seed), step \(step)")
+                tree = ProjectPackage.applying(skipping.changes, to: tree)
+            }
+        }
+    }
+
+    /// Edits `applyRandomEdit` doesn't make: adds, redo, region and screen fields, links, pastes across screens,
+    /// and details-panel style changes applied without recording, then recorded or put back.
+    private func applyOtherRandomEdit(to session: EditSession, using random: inout SeededGenerator) throws {
+        let project = session.project
+        guard let screen = project.screens.randomElement(using: &random) else { return }
+        let other = project.screens.randomElement(using: &random)!
+        let regions = screen.allRegions
+        switch random.int(0...7) {
+        case 0:
+            try session.perform(
+                AddScreen(
+                    name: ["Stress 2", "New", "Home"].randomElement(using: &random)!,
+                    viewport: Viewport(width: 390, height: 844), at: random.int(0...project.screens.count)))
+        case 1:
+            if session.canRedo {
+                try session.redo()
+            }
+        case 2:
+            guard let region = regions.randomElement(using: &random) else { return }
+            try session.perform(RegionCommands.setLinks([Link(screen: other.id, trigger: "tap")], of: region.id))
+        case 3:
+            guard let region = regions.randomElement(using: &random) else { return }
+            try session.perform(PasteRegions(screen: other.id, regions: [region]))
+        case 4:
+            try session.perform(
+                ScreenCommands.setViewport(Viewport(width: random.int(200...900), height: 800), of: screen.id))
+        case 5:
+            guard let region = regions.randomElement(using: &random) else { return }
+            let editor = try RegionEditor(region: region.id, in: session)
+            try editor.setTitle("Panel \(random.int(0...3))")
+            try editor.setDescription("Typed \(random.int(0...3))")
+            if random.chance(0.5) {
+                editor.commit()
+            } else {
+                editor.cancel()
+            }
+        case 6:
+            guard let region = regions.randomElement(using: &random) else { return }
+            let scroll = random.chance(0.5) ? nil : Scroll(axis: .vertical, contentWidth: 100, contentHeight: 900)
+            try session.perform(RegionCommands.setScroll(scroll, of: region.id))
+        default:
+            guard regions.count > 1 else { return }
+            try session.perform(DeleteRegions(screen: screen.id, regions: [regions.randomElement(using: &random)!.id]))
+        }
+    }
+
     private func applyRandomEdit(to session: EditSession, using random: inout SeededGenerator) throws {
         let project = session.project
         guard let screen = project.screens.randomElement(using: &random) else { return }

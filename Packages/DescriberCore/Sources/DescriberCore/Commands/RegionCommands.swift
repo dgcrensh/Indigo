@@ -5,6 +5,7 @@ import Foundation
 public struct CreateRegion: Command {
     public let actionName = "New Region"
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     public let id: RegionID
     public let frame: Frame
     public let title: String
@@ -60,6 +61,7 @@ public struct CreateRegion: Command {
 /// region is re-parented by the parenting rule at the screen's scroll positions, so it lands where it was dropped.
 public struct MoveRegions: Command {
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     public let regions: [RegionID]
     public let dx: Int
     public let dy: Int
@@ -122,6 +124,7 @@ public struct MoveRegions: Command {
 public struct ResizeRegion: Command {
     public let actionName = "Resize Region"
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     public let region: RegionID
     public let frame: Frame
     /// The edges being dragged; only these snap.
@@ -162,6 +165,7 @@ public struct ResizeRegion: Command {
 /// Deletes one or more regions and all their descendants.
 public struct DeleteRegions: Command {
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     public let regions: [RegionID]
 
     public init(screen: ScreenID, regions: [RegionID]) {
@@ -195,6 +199,7 @@ public struct ReorderRegion: Command {
     }
 
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     public let region: RegionID
     public let position: Position
 
@@ -234,6 +239,7 @@ public struct ReorderRegion: Command {
 /// Section 7). Regions with different parents are reordered within their own parents.
 public struct ReorderRegions: Command {
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     public let regions: [RegionID]
     public let position: ReorderRegion.Position
 
@@ -281,6 +287,7 @@ public struct PasteRegions: Command {
     /// "Paste", or "Duplicate" for a duplicate.
     public let actionName: String
     public let screen: ScreenID
+    public var affectedScreens: AffectedScreens { .screen(screen) }
     /// The new regions, top-level copies only; their children come with them.
     public let pasted: [Region]
     /// Places the copies under this region instead of applying the parenting rule.
@@ -367,6 +374,9 @@ public struct SetRegionScroll: Command {
         self.scrollOffsets = scrollOffsets
     }
 
+    /// The region's screen is found when the command is applied, and its inverse names it.
+    public var affectedScreens: AffectedScreens { .all }
+
     public func apply(to project: Project) throws -> Command {
         guard let (target, screen) = project.region(withID: region) else { throw EditError.regionNotFound(region) }
         let old = target.scroll
@@ -377,7 +387,8 @@ public struct SetRegionScroll: Command {
             actionName: actionName,
             commands: [
                 RestoreLayout(actionName: actionName, screen: screen.id, changes: changes),
-                SetRegionValue(actionName: actionName, region: region, keyPath: \.scroll, value: old),
+                SetRegionValue(
+                    actionName: actionName, region: region, keyPath: \.scroll, value: old, screen: screen.id),
             ])
     }
 }

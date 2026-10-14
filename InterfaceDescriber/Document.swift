@@ -62,7 +62,10 @@ final class Document: NSDocument {
     }
 
     override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
-        let changes = ProjectPackage.write(project: model.project, previous: packageTree, cache: encodingCache).changes
+        // The session's generations let the write skip screens no edit has touched since the last one.
+        let changes = ProjectPackage.write(
+            project: model.project, previous: packageTree, cache: encodingCache, generations: model.session.generations
+        ).changes
         PackageWrapper.apply(changes, to: packageWrapper)
         packageTree = ProjectPackage.applying(changes, to: packageTree)
         return packageWrapper
