@@ -80,17 +80,23 @@ final class RegionLayers {
 
     /// Takes the region's title, the frame it is drawn at, and the parts of that outside `bounds`.
     func update(from region: Region, drawnFrame: Frame, bounds: Frame, titleWidths: TitleWidths) {
-        if title.string as? String != region.title {
+        // Compared with the strings last given, kept in Swift, so an unchanged region costs no bridging or trimming.
+        if region.title != shownTitle {
+            shownTitle = region.title
             title.string = region.title
             titleWidth = titleWidths.width(of: region.title)
             needsLayout = true
         }
-        let description = region.description.trimmingCharacters(in: .whitespacesAndNewlines)
-        if descriptionText.string as? String != description {
+        if region.description != shownDescription {
+            shownDescription = region.description
+            let description = region.description.trimmingCharacters(in: .whitespacesAndNewlines)
             descriptionText.string = description
+            if hasDescription != !description.isEmpty {
+                hasDescription = !description.isEmpty
+                needsLayout = true
+            }
         }
-        if hasDescription != !description.isEmpty || hasLinks != !region.links.isEmpty {
-            hasDescription = !description.isEmpty
+        if hasLinks != !region.links.isEmpty {
             hasLinks = !region.links.isEmpty
             needsLayout = true
         }
@@ -103,6 +109,9 @@ final class RegionLayers {
 
     private var hasDescription = false
     private var hasLinks = false
+    /// The title and the untrimmed description the text layers were last given.
+    private var shownTitle: String?
+    private var shownDescription: String?
 
     /// Whether the link indicator is drawn, for tests.
     var isShowingLinkIndicator: Bool {

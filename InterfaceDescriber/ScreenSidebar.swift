@@ -13,8 +13,9 @@ struct ScreenSidebar: View {
     @State private var draftName = ""
     @FocusState private var nameFieldFocused: Bool
 
+    // The body reads the project, its screens and the settings through Observation, so it redraws when what it shows
+    // changes, not after every edit. Region edits reach a card only through its thumbnail revision.
     var body: some View {
-        let _ = model.revision
         let outline = SidebarOutline(project: model.project)
         VStack(spacing: 0) {
             // No list selection: the active card draws its own accent ring instead of the system highlight.
