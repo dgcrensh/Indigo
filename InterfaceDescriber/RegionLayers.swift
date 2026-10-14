@@ -6,6 +6,10 @@ import QuartzCore
 /// description when it is shown, a link indicator when the region has links, scroll indicators when it scrolls, and a
 /// tint over each part outside the canvas bounds. Inside scrolling content the box is masked to its clip. Frames are drawn frames
 /// (`ScrollLayout`), in zoomed screen coordinates (screen points × zoom).
+///
+/// The layers remember what they were last laid out for, so `layoutIfNeeded(zoom:)` skips a region nothing changed
+/// on. While the zoom is changing, `layout(zoom:fitsText:)` can keep the text layers' sizes and clip them instead of
+/// re-truncating and redrawing their text every frame.
 final class RegionLayers {
     static let titleFont = PaperFont.rounded(ofSize: 11, weight: .semibold)
     static let titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
@@ -21,6 +25,9 @@ final class RegionLayers {
     static let scrollIndicatorInset: CGFloat = 2
 
     let box = CALayer()
+    /// Clips the title and the description to the inside of the box, so their text can keep its size while the zoom
+    /// changes.
+    let textClip = CALayer()
     let title = CATextLayer()
     /// The description, read-only, under the title. Only shown with `D` (spec Section 4).
     let descriptionText = CATextLayer()
@@ -37,16 +44,24 @@ final class RegionLayers {
     private var titleWidth: CGFloat = 0
     private var colors: CanvasColors?
     private var kind: RegionKind = .open
+    /// Whether something the layout depends on changed since the last `layout(zoom:)`.
+    private(set) var needsLayout = true
+    /// The zoom of the last layout, and whether it fitted the text to it.
+    private var laidOutZoom: Double?
+    private var textFitted = false
 
     init() {
         box.anchorPoint = .zero
         box.borderWidth = 1
+        textClip.anchorPoint = .zero
+        textClip.masksToBounds = true
+        box.addSublayer(textClip)
         title.anchorPoint = .zero
         title.font = Self.titleFont
         title.fontSize = Self.titleFont.pointSize
         title.truncationMode = .end
         title.isWrapped = false
-        box.addSublayer(title)
+        textClip.addSublayer(title)
         descriptionText.anchorPoint = .zero
         descriptionText.font = Self.descriptionFont
         descriptionText.fontSize = Self.descriptionFont.pointSize
@@ -54,7 +69,7 @@ final class RegionLayers {
         descriptionText.truncationMode = .end
         descriptionText.masksToBounds = true
         descriptionText.isHidden = true
-        box.addSublayer(descriptionText)
+        textClip.addSublayer(descriptionText)
         linkIndicator.anchorPoint = .zero
         linkIndicator.cornerRadius = Self.linkIndicatorSize / 2
         linkIndicator.isHidden = true
@@ -67,14 +82,18 @@ final class RegionLayers {
     func update(from region: Region, drawnFrame: Frame, bounds: Frame, titleWidths: TitleWidths) {
         if title.string as? String != region.title {
             title.string = region.title
+            titleWidth = titleWidths.width(of: region.title)
+            needsLayout = true
         }
-        titleWidth = titleWidths.width(of: region.title)
         let description = region.description.trimmingCharacters(in: .whitespacesAndNewlines)
         if descriptionText.string as? String != description {
             descriptionText.string = description
         }
-        hasDescription = !description.isEmpty
-        hasLinks = !region.links.isEmpty
+        if hasDescription != !description.isEmpty || hasLinks != !region.links.isEmpty {
+            hasDescription = !description.isEmpty
+            hasLinks = !region.links.isEmpty
+            needsLayout = true
+        }
         if region.kind != kind {
             kind = region.kind
             applyFamily()
@@ -91,7 +110,11 @@ final class RegionLayers {
     }
 
     /// Whether the description is shown on the canvas. Call `layout(zoom:)` afterwards.
-    var showsDescription = false
+    var showsDescription = false {
+        didSet {
+            if showsDescription != oldValue { needsLayout = true }
+        }
+    }
 
     /// Whether the description layer is drawing text, for tests.
     var isShowingDescription: Bool {
@@ -121,12 +144,16 @@ final class RegionLayers {
     /// Clips the region to `clip`, a drawn frame, or nothing when nil. A clip that leaves nothing hides the region.
     /// Call `layout(zoom:)` afterwards.
     func setClip(_ clip: Frame?) {
+        guard clip != self.clip else { return }
         self.clip = clip
+        needsLayout = true
     }
 
     /// Shows a bar for each axis the region scrolls along. Call `layout(zoom:)` afterwards.
     func setScrollIndicators(_ indicators: [ScrollLayout.Indicator]) {
+        guard indicators != self.indicators else { return }
         self.indicators = indicators
+        needsLayout = true
         while indicatorLayers.count < indicators.count {
             let layer = CALayer()
             layer.anchorPoint = .zero
@@ -147,13 +174,16 @@ final class RegionLayers {
 
     /// Draws the region at `frame`, its own or one a gesture previews. Call `layout(zoom:)` afterwards.
     func setFrame(_ frame: Frame, bounds: Frame) {
+        let parts = bounds.contains(frame) ? [] : frame.parts(outside: bounds)
+        guard frame != self.frame || parts != self.parts else { return }
         self.frame = frame
-        parts = bounds.contains(frame) ? [] : frame.parts(outside: bounds)
+        self.parts = parts
+        needsLayout = true
         while tints.count < parts.count {
             let tint = CALayer()
             tint.anchorPoint = .zero
             tint.backgroundColor = colors?.outside
-            box.insertSublayer(tint, below: title)
+            box.insertSublayer(tint, below: textClip)
             tints.append(tint)
         }
         while tints.count > parts.count {
@@ -197,9 +227,26 @@ final class RegionLayers {
         box.borderWidth = isSelected ? 2 : 1
     }
 
+    /// Lays the layers out for `zoom` when something changed since the last layout, the zoom is different, or the
+    /// text was left unfitted.
+    func layoutIfNeeded(zoom: Double) {
+        if needsLayout || laidOutZoom != zoom || !textFitted {
+            layout(zoom: zoom)
+        }
+    }
+
+    /// Whether the title and description were last sized for the zoom they are drawn at, for tests.
+    var isTextFitted: Bool {
+        textFitted
+    }
+
     /// Sizes the layers for `zoom`. A title that fits keeps its natural width, so zooming redraws only the titles
-    /// whose truncation changes.
-    func layout(zoom: Double) {
+    /// whose truncation changes. With `fitsText` false, as while the zoom is changing, text already showing keeps
+    /// its size and is clipped to the box, so nothing redraws; a later layout with `fitsText` fits it again.
+    func layout(zoom: Double, fitsText: Bool = true) {
+        needsLayout = false
+        laidOutZoom = zoom
+        textFitted = true
         box.frame = Self.zoomed(frame, zoom)
         let radius = PaperShapes.regionCornerRadius(width: Double(frame.w), height: Double(frame.h)) * zoom
         box.cornerRadius = radius
@@ -213,22 +260,26 @@ final class RegionLayers {
         let available = box.bounds.width - 2 * inset.width
         layoutLinkIndicator()
         guard available >= 8, box.bounds.height >= Self.titleHeight + 2 * inset.height else {
+            textClip.isHidden = true
             title.isHidden = true
             descriptionText.isHidden = true
             return
         }
+        textClip.isHidden = false
+        textClip.frame = CGRect(
+            x: inset.width, y: inset.height, width: floor(available), height: box.bounds.height - 2 * inset.height)
         // The title stops short of the link indicator.
         let indicatorSpace =
             linkIndicator.isHidden
             ? 0 : Self.linkIndicatorSize + Self.linkIndicatorInset + Self.linkIndicatorGap - inset.width
+        let titleWidth = max(min(ceil(titleWidth), floor(available - indicatorSpace)), 0)
+        if fitsText || title.isHidden {
+            title.frame = CGRect(x: 0, y: 0, width: titleWidth, height: Self.titleHeight)
+        } else if title.frame.width != titleWidth {
+            textFitted = false
+        }
         title.isHidden = false
-        title.frame = CGRect(
-            x: inset.width,
-            y: inset.height,
-            width: max(min(ceil(titleWidth), floor(available - indicatorSpace)), 0),
-            height: Self.titleHeight
-        )
-        layoutDescription(width: floor(available))
+        layoutDescription(width: floor(available), fitsText: fitsText)
     }
 
     /// Rounds the corners of a tint that sit on the box's own rounded corners, so the tint stays inside the box.
@@ -305,17 +356,23 @@ final class RegionLayers {
         linkIndicator.frame = CGRect(x: box.bounds.width - inset - size, y: inset, width: size, height: size)
     }
 
-    /// Puts the description under the title, wrapped to the region's width and clipped to its height.
-    private func layoutDescription(width: CGFloat) {
-        let top = Self.titleInset.height + Self.titleHeight
-        let height = floor(box.bounds.height - top - Self.titleInset.height)
+    /// Puts the description under the title, wrapped to the region's width and clipped to its height. Without
+    /// `fitsText`, a description already showing keeps its size.
+    private func layoutDescription(width: CGFloat, fitsText: Bool) {
+        let top = Self.titleHeight
+        let height = floor(textClip.bounds.height - top)
         let lineHeight = ceil(Self.descriptionFont.ascender - Self.descriptionFont.descender)
         guard showsDescription, hasDescription, height >= lineHeight else {
             descriptionText.isHidden = true
             return
         }
+        let frame = CGRect(x: 0, y: top, width: width, height: height)
+        if fitsText || descriptionText.isHidden {
+            descriptionText.frame = frame
+        } else if descriptionText.frame != frame {
+            textFitted = false
+        }
         descriptionText.isHidden = false
-        descriptionText.frame = CGRect(x: Self.titleInset.width, y: top, width: width, height: height)
     }
 
     static func zoomed(_ frame: Frame, _ zoom: Double) -> CGRect {

@@ -37,7 +37,7 @@ final class CanvasView: NSView {
                 if camera.zoom == oldValue.zoom {
                     positionContent()
                 } else {
-                    layoutContent()
+                    zoomChanged()
                 }
                 layoutGrid()
             }
@@ -133,6 +133,12 @@ final class CanvasView: NSView {
     /// Whether a press started a gesture that hasn't been released yet.
     private var isTrackingGesture = false
     private let titleWidths = TitleWidths()
+    /// When the zoom last changed. A change soon after another, as in a pinch or the details-panel zoom, clips the
+    /// region text instead of fitting it, and `settleTimer` fits it once the zoom has stayed put for `textSettleDelay`.
+    private var lastZoomChange: CFTimeInterval = -.infinity
+    private var settleTimer: Timer?
+    /// How long the zoom stays put before clipped region text is fitted again, in seconds.
+    static let textSettleDelay: CFTimeInterval = 0.15
     private var colors = CanvasColors(appearance: NSAppearance.currentDrawing())
 
     override init(frame frameRect: NSRect) {
@@ -253,6 +259,7 @@ final class CanvasView: NSView {
         for layers in regionLayers.values {
             layers.apply(colors, scale: scale)
         }
+        appliedScale = scale
         for layer in [newRegionLayer, marqueeLayer] {
             layer.fillColor = colors.accentWash
             layer.strokeColor = colors.accent
@@ -271,7 +278,12 @@ final class CanvasView: NSView {
 
     // MARK: Content
 
-    /// Builds the region layers again from the screen, reusing the layers of regions that are still there.
+    /// The backing scale the region layers were last given, so a reload gives it to new layers and only re-applies it
+    /// when it changed.
+    private var appliedScale: CGFloat?
+
+    /// Builds the region layers again from the screen, reusing the layers of regions that are still there. Layers
+    /// whose region didn't change are left alone, so an edit costs about what it changed.
     func reload() {
         withoutAnimation {
             emptyLabel.isHidden = screen != nil
@@ -292,17 +304,23 @@ final class CanvasView: NSView {
             self.scrollLayout = layout
             drawnRegions = [:]
             let selected = Set(selection)
+            let scale = self.scale
+            let scaleChanged = scale != appliedScale
+            appliedScale = scale
             var kept: [RegionID: RegionLayers] = [:]
             var regions: [RegionID: Region] = [:]
             var boxes: [CALayer] = []
             for region in screen.allRegions {
-                let layers = regionLayers[region.id] ?? RegionLayers()
+                let existing = regionLayers[region.id]
+                let layers = existing ?? RegionLayers()
+                if existing == nil || scaleChanged {
+                    layers.apply(colors, scale: scale)
+                }
                 let drawn = DrawnRegion(layout, region.id)
                 layers.update(from: region, drawnFrame: drawn.frame, bounds: bounds, titleWidths: titleWidths)
                 layers.setClip(drawn.clip)
                 layers.setScrollIndicators(layout.indicators(of: region.id))
                 drawnRegions[region.id] = drawn
-                layers.apply(colors, scale: scale)
                 layers.isSelected = selected.contains(region.id)
                 layers.showsDescription = visibleDescriptions.contains(region.id)
                 kept[region.id] = layers
@@ -311,7 +329,10 @@ final class CanvasView: NSView {
             }
             regionLayers = kept
             self.regions = regions
-            regionsLayer.sublayers = boxes
+            // Setting the sublayers removes and re-adds every box, so it is done only when the order changed.
+            if !(regionsLayer.sublayers ?? []).elementsEqual(boxes, by: ===) {
+                regionsLayer.sublayers = boxes
+            }
             if case .frames(let frames) = preview {
                 showPreviewFrames(frames)
             }
@@ -383,8 +404,55 @@ final class CanvasView: NSView {
         !contentOutline.isHidden
     }
 
-    /// Sizes everything for the camera's zoom, then positions it.
-    private func layoutContent() {
+    /// Lays out for a new zoom. The first change in a while fits the region text at once; one that follows soon
+    /// after another clips the text that is showing and leaves fitting it to `settleText()`.
+    private func zoomChanged() {
+        let now = CACurrentMediaTime()
+        let isRun = now - lastZoomChange < Self.textSettleDelay
+        lastZoomChange = now
+        layoutContent(fitsText: !isRun)
+        if isRun {
+            scheduleTextSettle()
+        }
+    }
+
+    /// Fits the region text once the zoom has stayed put for `textSettleDelay`, checking again if it moved since.
+    private func scheduleTextSettle() {
+        guard settleTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.textSettleDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.settleTimer = nil
+                if CACurrentMediaTime() - self.lastZoomChange < Self.textSettleDelay {
+                    self.scheduleTextSettle()
+                } else {
+                    self.settleText()
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        settleTimer = timer
+    }
+
+    /// Fits any region text a zoom left clipped to the current zoom.
+    func settleText() {
+        settleTimer?.invalidate()
+        settleTimer = nil
+        withoutAnimation {
+            for layers in regionLayers.values where !layers.isTextFitted {
+                layers.layout(zoom: camera.zoom)
+            }
+        }
+    }
+
+    /// Whether every region's text is fitted to the zoom, for tests.
+    var isTextSettled: Bool {
+        regionLayers.values.allSatisfy(\.isTextFitted)
+    }
+
+    /// Sizes everything for the camera's zoom, then positions it. Regions laid out for this zoom with nothing changed
+    /// since are skipped; with `fitsText` false, a zoom change keeps each region's text at its size, clipped.
+    private func layoutContent(fitsText: Bool = true) {
         guard let screen else { return }
         let zoom = camera.zoom
         boundsLayer.bounds = CGRect(origin: .zero, size: RegionLayers.zoomed(screen.canvasBounds, zoom).size)
@@ -401,7 +469,11 @@ final class CanvasView: NSView {
             viewportOutline.isHidden = true
         }
         for layers in regionLayers.values {
-            layers.layout(zoom: zoom)
+            if fitsText {
+                layers.layoutIfNeeded(zoom: zoom)
+            } else {
+                layers.layout(zoom: zoom, fitsText: false)
+            }
         }
         layoutOverlay()
         positionContent()
@@ -644,6 +716,9 @@ final class CanvasView: NSView {
         guard screen != nil else { return }
         let anchor = convert(event.locationInWindow, from: nil)
         change(to: camera.zoomed(to: camera.zoom * (1 + event.magnification), anchor: anchor))
+        if event.phase == .ended || event.phase == .cancelled {
+            settleText()
+        }
     }
 
     // MARK: Clicks, drags and keys
