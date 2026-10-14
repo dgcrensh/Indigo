@@ -123,8 +123,8 @@ core's `RegionEditor`.
 - [ ] (App) Return in the title moves focus to the description; Tab in the description moves to the next field.
 - [ ] (App) Undo while the panel is open reverts the session and closes the panel.
 - [ ] (App) The Tools menu's bare-key items are disabled while the title field is being edited.
-- [ ] (App) While a panel field is being edited, the window's undo manager is the panel's own, so Cmd-Z undoes
-  typing; with the canvas focused it is the document's.
+- [ ] (App) The panel's text fields use the panel's own undo manager (through their own field editor), so Cmd-Z
+  while typing undoes typing; with the canvas focused, undo is the document's.
 - [ ] (App) Kind, a link with a trigger, and scrolling set in the panel are one "Edit Region" step.
 - [ ] `Schema/examples/acme.uidesc` still re-saves byte for byte.
 - [ ] `scripts/check.sh` passes.

@@ -218,10 +218,12 @@ final class DetailsPanelTests: XCTestCase {
         draw(canvas, from: CGPoint(x: 20, y: 20), to: CGPoint(x: 100, y: 75), in: document)
         let window = try XCTUnwrap(controller.window)
         XCTAssertTrue(controller.detailsController.isEditingText(window.firstResponder))
-        XCTAssertIdentical(window.delegate, controller)
-        XCTAssertIdentical(window.undoManager, controller.detailsController.textUndoManager)
+        let panel = controller.detailsController
+        XCTAssertIdentical(window.firstResponder, panel.fieldEditor)
+        XCTAssertIdentical(window.firstResponder?.undoManager, panel.textUndoManager)
+        XCTAssertIdentical(panel.descriptionView.undoManager, panel.textUndoManager)
         window.makeFirstResponder(canvas.canvasView)
-        XCTAssertIdentical(window.undoManager, document.undoManager)
+        XCTAssertIdentical(window.firstResponder?.undoManager, document.undoManager)
     }
 
     // MARK: Fields

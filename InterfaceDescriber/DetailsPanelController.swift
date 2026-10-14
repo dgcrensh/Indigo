@@ -29,15 +29,27 @@ final class DetailsPanelController: NSViewController {
     /// Set while the controls are filled from the model, so their change callbacks don't write back.
     private var isLoading = false
     /// Undo for typing in the panel's text fields, kept apart from the document's so Cmd-Z while typing undoes
-    /// typing, and typing never leaves steps on the document's stack. The window hands it out while a panel field is
-    /// being edited, and it is cleared whenever the panel shows another region or closes.
+    /// typing, and typing never leaves steps on the document's stack. The description and the panel's field editor
+    /// use it, and it is cleared whenever the panel shows another region or closes.
     let textUndoManager = UndoManager()
+    /// The field editor for the panel's text fields, which the window hands out through its delegate.
+    let fieldEditor = PanelTextView()
 
     init(model: DocumentModel) {
         self.model = model
-        descriptionScrollView = NSTextView.scrollableTextView()
-        descriptionView = descriptionScrollView.documentView as! NSTextView
+        let textView = PanelTextView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 140))
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = .width
+        textView.textContainer?.widthTracksTextView = true
+        descriptionView = textView
+        descriptionScrollView = NSScrollView()
+        descriptionScrollView.hasVerticalScroller = true
+        descriptionScrollView.documentView = textView
         super.init(nibName: nil, bundle: nil)
+        textView.panelUndoManager = textUndoManager
+        fieldEditor.isFieldEditor = true
+        fieldEditor.panelUndoManager = textUndoManager
     }
 
     @available(*, unavailable)
@@ -445,6 +457,32 @@ final class LinkRow: NSStackView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used")
+    }
+}
+
+/// A text view whose typing undo goes to the details panel's own undo manager, and which answers Undo and Redo
+/// itself, so they reach that manager rather than the document's while it has focus.
+final class PanelTextView: NSTextView {
+    weak var panelUndoManager: UndoManager?
+
+    override var undoManager: UndoManager? {
+        panelUndoManager ?? super.undoManager
+    }
+
+    @objc func undo(_ sender: Any?) {
+        undoManager?.undo()
+    }
+
+    @objc func redo(_ sender: Any?) {
+        undoManager?.redo()
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        switch item.action {
+        case #selector(undo(_:)): return undoManager?.canUndo ?? false
+        case #selector(redo(_:)): return undoManager?.canRedo ?? false
+        default: return super.validateUserInterfaceItem(item)
+        }
     }
 }
 

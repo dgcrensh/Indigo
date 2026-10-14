@@ -199,12 +199,13 @@ final class DocumentWindowController: NSWindowController {
 }
 
 extension DocumentWindowController: NSWindowDelegate {
-    /// While a details panel field is being edited, Cmd-Z undoes typing there rather than document steps.
-    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
-        if detailsController.isEditingText(window.firstResponder) {
-            return detailsController.textUndoManager
+    /// The details panel's fields get its own field editor, so Cmd-Z while typing undoes typing there rather than
+    /// document steps.
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        if let view = client as? NSView, detailsController.isViewLoaded, view.isDescendant(of: detailsController.view) {
+            return detailsController.fieldEditor
         }
-        return (document as? NSDocument)?.undoManager
+        return nil
     }
 }
 
