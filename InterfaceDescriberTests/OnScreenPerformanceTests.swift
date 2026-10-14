@@ -15,10 +15,12 @@ final class OnScreenPerformanceTests: XCTestCase {
 
     /// A shown window on a document holding the stress project, and how long opening it took in milliseconds.
     @MainActor
-    private func makeWindow(regionCount: Int) throws -> (Document, DocumentWindowController, Double) {
+    private func makeWindow(regionCount: Int, screenCount: Int = 1) throws -> (
+        Document, DocumentWindowController, Double
+    ) {
         let start = CACurrentMediaTime()
         let document = Document()
-        document.model.replaceProject(with: .stressTest(regionCount: regionCount))
+        document.model.replaceProject(with: .stressTest(regionCount: regionCount, screenCount: screenCount))
         document.makeWindowControllers()
         let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
         controller.window?.setContentSize(viewSize)
@@ -183,5 +185,60 @@ final class OnScreenPerformanceTests: XCTestCase {
                 XCTAssertLessThan(Self.median(nudgeOne), 16, "nudge one")
             }
         }
+    }
+
+    /// The first scroll view in `view`'s subtree.
+    private func scrollView(in view: NSView) -> NSScrollView? {
+        if let scrollView = view as? NSScrollView { return scrollView }
+        for subview in view.subviews {
+            if let found = scrollView(in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// Switching screens and scrolling the sidebar with 40 screens of 300 regions and the sidebar open (milestone 24).
+    /// Each frame lets SwiftUI apply its pending update, then lays out and draws the window.
+    @MainActor
+    func testSidebarTimingsOnScreen() throws {
+        let (document, controller, _) = try makeWindow(regionCount: 300, screenCount: 40)
+        defer { controller.close() }
+        let window = try XCTUnwrap(controller.window)
+        controller.sidebarItem.isCollapsed = false
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        CATransaction.flush()
+        settle(0.3)
+        func draw() {
+            RunLoop.main.run(mode: .default, before: Date())
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+        }
+        let screens = document.model.project.screens.map(\.id)
+
+        ScreenCard.bodyCounts = [:]
+        let switches = time(20, pause: 0.05) { step in
+            document.model.show(screens[(step + 1) % 4])
+            controller.canvasController.update()
+            draw()
+        }
+        let cardBodies = ScreenCard.bodyCounts.values.reduce(0, +)
+        settle(0.2)
+
+        let sidebar = try XCTUnwrap(scrollView(in: controller.sidebarItem.viewController.view))
+        let clip = sidebar.contentView
+        let travel = max(0, (sidebar.documentView?.frame.height ?? 0) - clip.bounds.height)
+        let scroll = time(120) { step in
+            let progress = step < 60 ? Double(step + 1) / 60 : Double(119 - step) / 60
+            clip.scroll(to: NSPoint(x: 0, y: travel * progress))
+            sidebar.reflectScrolledClipView(clip)
+            draw()
+        }
+        let overBudget = scroll.filter { $0 > 1000 / 60 }.count
+
+        print(Self.line(40 * 300, "switch screens with the sidebar open (40 screens)", switches))
+        print(String(format: "On screen, 40 screens, card bodies run by 20 screen switches: %d", cardBodies))
+        print(Self.line(40 * 300, "scroll the sidebar (40 screens, \(Int(travel)) pt)", scroll))
+        print(String(format: "On screen, 40 screens, sidebar scroll frames over 16.7 ms: %d of 120", overBudget))
+        XCTAssertGreaterThan(travel, 0, "the sidebar scrolls")
     }
 }

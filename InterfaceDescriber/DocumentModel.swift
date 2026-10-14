@@ -217,8 +217,25 @@ final class DocumentModel {
     }
 }
 
-/// A screen's thumbnail revision, observed by its sidebar card alone.
+/// A screen's thumbnail revision, observed by its sidebar card alone, and the thumbnail last computed for it, so a
+/// card that redraws or scrolls back into view at the same revision reuses it (milestone 24).
 @Observable
 final class ThumbnailRevision {
     var value = 0
+    @ObservationIgnored private var cached: (value: Int, width: Double, height: Double, thumbnail: ScreenThumbnail)?
+    /// How many times a thumbnail was computed, for tests.
+    @ObservationIgnored private(set) var computations = 0
+
+    /// `screen`'s thumbnail fitting a `width` × `height` box at the current revision, computed only when the revision
+    /// or the box changed since the last call.
+    func thumbnail(for screen: Screen, width: Double, height: Double) -> ScreenThumbnail {
+        let value = self.value
+        if let cached, cached.value == value, cached.width == width, cached.height == height {
+            return cached.thumbnail
+        }
+        let thumbnail = ScreenThumbnail.rects(for: screen, width: width, height: height)
+        computations += 1
+        cached = (value, width, height, thumbnail)
+        return thumbnail
+    }
 }
