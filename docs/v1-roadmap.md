@@ -25,7 +25,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 9 | Scrolling | [m9-scrolling.md](plans/m9-scrolling.md) | 5, 6 | shipped |
 | 10 | Settings file and live reload | [m10-settings.md](plans/m10-settings.md) | 3 | shipped |
 | 11 | Exports: Markdown, single-file JSON, PNG | [m11-exports.md](plans/m11-exports.md) | 1 (PNG needs 4) | shipped |
-| 12 | Hardening and acceptance pass | not written | all | |
+| 12 | Hardening and acceptance pass | [m12-hardening.md](plans/m12-hardening.md) | all | shipped |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:
 
@@ -106,7 +106,8 @@ Indigo/
 
 ## 4. Acceptance Criteria Map
 
-Every spec Section 13 criterion, and the milestone whose "Done when" list proves it.
+Every spec Section 13 criterion, and the milestone whose "Done when" list proves it. [acceptance.md](acceptance.md)
+names the tests behind each one and the check left for the Mac.
 
 | Spec 13 criterion | Milestone |
 | --- | --- |
