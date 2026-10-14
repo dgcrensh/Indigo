@@ -210,6 +210,10 @@ final class DetailsPanelController: NSViewController {
         textUndoManager.removeAllActions()
         let fields = editor.fields
         titleField.stringValue = fields.title
+        // If the title is still being edited, its field editor holds the last region's text.
+        if let fieldEditor = titleField.currentEditor() {
+            fieldEditor.string = fields.title
+        }
         descriptionView.string = fields.description
         kindPopUp.selectItem(at: RegionKind.allCases.firstIndex(of: fields.kind) ?? 0)
         rebuildLinkRows()
