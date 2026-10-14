@@ -106,6 +106,62 @@ final class DocumentTests: XCTestCase {
         XCTAssertEqual(controller.inspectorItem.behavior, .inspector)
         XCTAssertTrue(controller.inspectorItem.isCollapsed)
         XCTAssertFalse(controller.canvasItem.isCollapsed)
+        XCTAssertTrue(controller.canvasItem.viewController === controller.canvasController)
+        controller.close()
+    }
+
+    @MainActor
+    func testCommandsUndoAndRedoChangeTheRevision() throws {
+        let document = Document()
+        let undoManager = try XCTUnwrap(document.undoManager)
+        undoManager.groupsByEvent = false
+        let start = document.model.revision
+
+        undoManager.beginUndoGrouping()
+        try document.perform(AddScreen(name: "Settings", viewport: .defaultForNewScreens))
+        undoManager.endUndoGrouping()
+        XCTAssertEqual(document.model.revision, start + 1)
+        undoManager.undo()
+        XCTAssertEqual(document.model.revision, start + 2)
+        undoManager.redo()
+        XCTAssertEqual(document.model.revision, start + 3)
+    }
+
+    @MainActor
+    func testCanvasKeepsEachScreensZoomInTheEditorState() throws {
+        let document = Document()
+        try document.read(from: try exampleWrapper(), ofType: AppIdentity.documentTypeIdentifier)
+        document.makeWindowControllers()
+        let controller = try XCTUnwrap(document.windowControllers.first as? DocumentWindowController)
+        controller.window?.layoutIfNeeded()
+        let canvas = controller.canvasController
+        let project = document.model.project
+        let first = project.screens[0].id
+        let second = project.screens[1].id
+
+        // A screen with no saved camera is fitted, and nothing is saved for it.
+        XCTAssertEqual(canvas.canvasView.screen?.id, first)
+        XCTAssertTrue(canvas.isFitted)
+        XCTAssertNil(project.editorState.screens[first])
+
+        canvas.zoomIn()
+        let zoomed = canvas.canvasView.camera
+        XCTAssertFalse(canvas.isFitted)
+        XCTAssertEqual(project.editorState.screens[first].map { Camera($0) }, zoomed)
+
+        document.model.activeScreenID = second
+        canvas.update()
+        XCTAssertEqual(canvas.canvasView.screen?.id, second)
+        XCTAssertTrue(canvas.isFitted)
+
+        document.model.activeScreenID = first
+        canvas.update()
+        XCTAssertEqual(canvas.canvasView.camera, zoomed)
+        XCTAssertFalse(canvas.isFitted)
+
+        // The camera is written with the rest of the project.
+        let tree = PackageWrapper.tree(of: try document.fileWrapper(ofType: AppIdentity.documentTypeIdentifier))
+        XCTAssertNotNil(tree[".editor-state.json"])
         controller.close()
     }
 }
