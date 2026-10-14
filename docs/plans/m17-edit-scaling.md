@@ -5,7 +5,7 @@ Builds on the parenting rule and commands from [m2-commands.md](m2-commands.md),
 [m9-scrolling.md](m9-scrolling.md), and the core timings `scripts/bench.sh` added after
 [m16-chrome-responsiveness.md](m16-chrome-responsiveness.md).
 
-**Status:** reviewed
+**Status:** shipped
 
 ## Goal
 

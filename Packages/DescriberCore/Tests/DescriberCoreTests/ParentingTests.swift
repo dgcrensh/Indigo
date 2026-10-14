@@ -107,4 +107,29 @@ final class ParentingTests: XCTestCase {
         XCTAssertEqual(index.path(to: inner.id).map(\.id), [outer.id, inner.id])
         XCTAssertEqual(index.descendants(of: outer.id).map(\.id), [inner.id])
     }
+
+    /// The draw-order range check agrees with walking the path to the root, for every pair on the stress screen, and
+    /// the index's other answers agree with the tree.
+    func testIsDescendantAgreesWithThePathForEveryPairOnTheStressScreen() throws {
+        let screen = try XCTUnwrap(Project.stressTest(regionCount: 500).screens.first)
+        let index = RegionIndex(screen: screen)
+        XCTAssertEqual(index.regions.map(\.id), screen.allRegions.map(\.id))
+        let paths = index.regions.map { region in Set(index.path(to: region.id).map(\.id)) }
+        for (position, region) in index.regions.enumerated() {
+            XCTAssertEqual(index.position(of: region.id), position)
+            XCTAssertEqual(index.descendants(of: region.id).map(\.id), region.subtree.dropFirst().map(\.id))
+            for (other, path) in zip(index.regions, paths)
+            where index.isDescendant(other.id, of: region.id) != path.contains(region.id) {
+                XCTFail("\(other.id) under \(region.id)")
+            }
+        }
+    }
+
+    func testIsInsideLooksOnlyAboveTheRegion() {
+        let (_, screen, outer, inner, side) = Fixtures.nestedProject()
+        let index = RegionIndex(screen: screen)
+        XCTAssertTrue(index.isInside(inner.id, anyOf: [outer.id]))
+        XCTAssertFalse(index.isInside(inner.id, anyOf: [inner.id, side.id]))
+        XCTAssertFalse(index.isInside(outer.id, anyOf: [outer.id, inner.id]))
+    }
 }

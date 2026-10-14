@@ -1,46 +1,83 @@
 import Foundation
 
-/// The shape of one screen's region tree: which region is where, and every region's frame. Restoring it puts the
-/// same `Region` objects back, so undo keeps region identity for the canvas. Region commands that change the tree
-/// return a `RestoreLayout` of the layout from before they ran as their inverse.
-struct RegionLayout {
-    var topLevel: [RegionID]
-    var children: [RegionID: [RegionID]]
-    var frames: [RegionID: Frame]
-    /// Every region object the layout refers to.
-    var regions: [RegionID: Region]
+/// The sibling lists and frames a region command changed on one screen, as they were before it changed them. Each is
+/// recorded once, before its first change, so restoring them puts back exactly what the command touched, with the
+/// same `Region` objects, and undo keeps region identity for the canvas. Region commands that change the tree return
+/// a `RestoreLayout` of the changes as their inverse, so undo costs what the edit changed rather than the screen.
+struct LayoutChanges {
+    /// The screen's top-level regions, when they changed.
+    private var topLevel: [Region]?
+    /// Keyed by the parent region's object.
+    private var children: [ObjectIdentifier: (parent: Region, children: [Region])] = [:]
+    private var frames: [ObjectIdentifier: (region: Region, frame: Frame)] = [:]
 
-    init(screen: Screen) {
-        topLevel = screen.regions.map(\.id)
-        children = [:]
-        frames = [:]
-        regions = [:]
+    init() {}
+
+    /// Every sibling list and frame on `screen`, for changes that build up over time where the commands that make
+    /// them aren't kept, such as a region open in the details panel.
+    init(wholeScreen screen: Screen) {
+        recordSiblings(of: nil, in: screen)
         for region in screen.allRegions {
-            children[region.id] = region.children.map(\.id)
-            frames[region.id] = region.frame
-            regions[region.id] = region
+            recordSiblings(of: region, in: screen)
+            recordFrame(of: region)
         }
     }
 
-    func restore(into screen: Screen) {
-        for (id, region) in regions {
-            region.frame = frames[id]!
-            region.children = children[id]!.map { regions[$0]! }
+    /// Records the children of `parent`, or the screen's top-level regions when it is nil, unless they were recorded
+    /// already. Call before changing them.
+    mutating func recordSiblings(of parent: Region?, in screen: Screen) {
+        guard let parent else {
+            if topLevel == nil {
+                topLevel = screen.regions
+            }
+            return
         }
-        screen.regions = topLevel.map { regions[$0]! }
+        let key = ObjectIdentifier(parent)
+        if children[key] == nil {
+            children[key] = (parent, parent.children)
+        }
+    }
+
+    /// Records the frame of `region`, unless it was recorded already. Call before changing it.
+    mutating func recordFrame(of region: Region) {
+        let key = ObjectIdentifier(region)
+        if frames[key] == nil {
+            frames[key] = (region, region.frame)
+        }
+    }
+
+    /// The same lists and frames as they are on `screen` now.
+    func current(in screen: Screen) -> LayoutChanges {
+        var current = LayoutChanges()
+        current.topLevel = topLevel.map { _ in screen.regions }
+        current.children = children.mapValues { ($0.parent, $0.parent.children) }
+        current.frames = frames.mapValues { ($0.region, $0.region.frame) }
+        return current
+    }
+
+    func restore(into screen: Screen) {
+        if let topLevel {
+            screen.regions = topLevel
+        }
+        for entry in children.values {
+            entry.parent.children = entry.children
+        }
+        for entry in frames.values {
+            entry.region.frame = entry.frame
+        }
     }
 }
 
 struct RestoreLayout: Command {
     let actionName: String
     let screen: ScreenID
-    let layout: RegionLayout
+    let changes: LayoutChanges
 
     func apply(to project: Project) throws -> Command {
         let screen = try project.requireScreen(self.screen)
-        let current = RegionLayout(screen: screen)
-        layout.restore(into: screen)
-        return RestoreLayout(actionName: actionName, screen: self.screen, layout: current)
+        let current = changes.current(in: screen)
+        changes.restore(into: screen)
+        return RestoreLayout(actionName: actionName, screen: self.screen, changes: current)
     }
 }
 

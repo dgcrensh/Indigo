@@ -65,41 +65,50 @@ public enum Parenting {
     public static func reparentAfterChange(
         of id: RegionID, in screen: Screen, offsets: [RegionID: ScrollOffset] = [:], keepingParent: Bool = false
     ) {
-        place([id], in: screen, offsets: offsets, keepingParents: keepingParent ? [id] : [])
+        var changes = LayoutChanges()
+        place([id], in: screen, offsets: offsets, keepingParents: keepingParent ? [id] : [], recording: &changes)
     }
 
     /// Applies the rule to each of `ids` in turn, as `reparentAfterChange` does to one, against one layout of the
     /// screen that is rebuilt only after a placement changed the tree. `keepingParents` are the regions whose
-    /// scrolling parents stay candidates.
+    /// scrolling parents stay candidates. What it is about to change goes in `changes` first.
     static func place(
-        _ ids: [RegionID], in screen: Screen, offsets: [RegionID: ScrollOffset], keepingParents: Set<RegionID> = []
+        _ ids: [RegionID], in screen: Screen, offsets: [RegionID: ScrollOffset], keepingParents: Set<RegionID> = [],
+        recording changes: inout LayoutChanges
     ) {
-        var placer = Placer(screen: screen, offsets: offsets)
+        var placer = Placer(screen: screen, offsets: offsets, recording: changes)
+        changes = LayoutChanges()  // so the placer's copy is the only one and records without copying
         for id in ids {
             placer.placeAfterChange(id, keepingParent: keepingParents.contains(id))
         }
+        changes = placer.changes
     }
 
     /// Applies the rule to each child of `region` that its content area no longer holds.
     static func replaceChildrenOutsideContent(
-        of region: Region, in screen: Screen, offsets: [RegionID: ScrollOffset]
+        of region: Region, in screen: Screen, offsets: [RegionID: ScrollOffset], recording changes: inout LayoutChanges
     ) {
-        var placer = Placer(screen: screen, offsets: offsets)
+        var placer = Placer(screen: screen, offsets: offsets, recording: changes)
+        changes = LayoutChanges()  // so the placer's copy is the only one and records without copying
         placer.replaceChildrenOutsideContent(of: region)
+        changes = placer.changes
     }
 
     /// Places regions one after another against one `ScrollLayout`. A placement that keeps a region's parent keeps
     /// its frame too (its frame in the file is its drawn frame plus its parent's content shift), so the layout stays
-    /// valid and is rebuilt only after a placement moved a region to a new parent.
+    /// valid and is rebuilt only after a placement moved a region to a new parent. Everything it changes is recorded
+    /// in `changes` first.
     struct Placer {
         let screen: Screen
         let offsets: [RegionID: ScrollOffset]
+        private(set) var changes: LayoutChanges
         /// Nil when the tree changed since it was built.
         private var cached: ScrollLayout?
 
-        init(screen: Screen, offsets: [RegionID: ScrollOffset]) {
+        init(screen: Screen, offsets: [RegionID: ScrollOffset], recording changes: LayoutChanges = LayoutChanges()) {
             self.screen = screen
             self.offsets = offsets
+            self.changes = changes
         }
 
         private mutating func layout() -> ScrollLayout {
@@ -125,6 +134,7 @@ public enum Parenting {
 
         /// Appends `region` as the last top-level region, keeping the layout current.
         mutating func attachTopLevel(_ region: Region) {
+            changes.recordSiblings(of: nil, in: screen)
             screen.regions.append(region)
             cached?.appendTopLevel(region)
         }
@@ -143,20 +153,23 @@ public enum Parenting {
             let dy = placement.frame.y - entry.region.frame.y
             if dx != 0 || dy != 0 {
                 for region in index.regions[position...entry.subtreeEnd] {
+                    changes.recordFrame(of: region)
                     region.frame = region.frame.offsetBy(dx: dx, dy: dy)
                 }
                 cached = nil
             }
             guard placement.parent != entry.parent else { return }
-            detach(id, in: screen, index: index)
-            attach(entry.region, toParent: placement.parent.flatMap(index.region), in: screen)
+            detach(id, in: screen, index: index, recording: &changes)
+            attach(
+                entry.region, toParent: placement.parent.flatMap(index.region), in: screen, recording: &changes)
             cached = nil
         }
     }
 
     /// Removes `id` from its sibling list.
-    static func detach(_ id: RegionID, in screen: Screen, index: RegionIndex) {
+    static func detach(_ id: RegionID, in screen: Screen, index: RegionIndex, recording changes: inout LayoutChanges) {
         guard let region = index.region(id) else { return }
+        changes.recordSiblings(of: index.parent(of: id), in: screen)
         if let parent = index.parent(of: id) {
             parent.children.removeAll { $0 === region }
         } else {
@@ -165,7 +178,10 @@ public enum Parenting {
     }
 
     /// Appends `region` as the last child of `parent`, or as the last top-level region.
-    static func attach(_ region: Region, toParent parent: Region?, in screen: Screen) {
+    static func attach(
+        _ region: Region, toParent parent: Region?, in screen: Screen, recording changes: inout LayoutChanges
+    ) {
+        changes.recordSiblings(of: parent, in: screen)
         if let parent {
             parent.children.append(region)
         } else {

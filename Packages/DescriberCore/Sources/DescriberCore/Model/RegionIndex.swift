@@ -47,7 +47,8 @@ public struct RegionIndex {
             positions[region.id] = position
             entries.append(
                 Entry(
-                    region: region, parent: parent.map { regions[$0].id }, siblingIndex: firstSibling + offset, drawOrder: position,
+                    region: region, parent: parent.map { regions[$0].id }, siblingIndex: firstSibling + offset,
+                    drawOrder: position,
                     subtreeEnd: position, parentPosition: parent))
             regions.append(region)
             add(region.children, parent: position)
