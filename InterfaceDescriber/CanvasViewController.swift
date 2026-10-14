@@ -73,7 +73,7 @@ final class CanvasViewController: NSViewController {
             restoreCamera(for: screen)
         }
         canvasView.gridSize = screen.flatMap { model.snappingEnabled ? gridSize(for: $0) : nil }
-        canvasView.needsDisplay = true
+        canvasView.reload()
     }
 
     private func gridSize(for screen: Screen) -> Int {
