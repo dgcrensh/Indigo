@@ -23,6 +23,10 @@ protocol CanvasInteraction: AnyObject {
 /// two-finger scrolls and pinches into camera changes, and passes clicks, drags, keys and scrolls over scrollable
 /// regions to its `interaction`. Shows the selection, resize handles, and what a gesture in progress would do.
 /// Regions are drawn where their scroll positions put them (`ScrollLayout`).
+///
+/// Only regions near the view are mounted: laid out for the zoom and in the layer tree (milestone 20). The rest wait
+/// out of the tree until a pan or zoom brings them into the covered rect (`CanvasCoverage`), so the canvas does work
+/// in proportion to what is on screen. Selected and previewed regions stay mounted wherever they are.
 final class CanvasView: NSView {
     /// The screen to draw. Call `reload()` after it changes in place.
     var screen: Screen? {
@@ -36,7 +40,10 @@ final class CanvasView: NSView {
             withoutAnimation {
                 if camera.zoom == oldValue.zoom {
                     positionContent()
+                    if refreshCoverage() { updateMounts() }
                 } else {
+                    refreshCoverage()
+                    updateMounts()
                     zoomChanged()
                 }
                 layoutGrid()
@@ -66,6 +73,7 @@ final class CanvasView: NSView {
     var selection: [RegionID] = [] {
         didSet {
             guard selection != oldValue else { return }
+            selectedIDs = Set(selection)
             withoutAnimation(applySelection)
         }
     }
@@ -74,7 +82,8 @@ final class CanvasView: NSView {
         didSet {
             guard visibleDescriptions != oldValue else { return }
             withoutAnimation {
-                for (id, layers) in regionLayers {
+                for id in mounted {
+                    guard let layers = regionLayers[id] else { continue }
                     let shows = visibleDescriptions.contains(id)
                     if layers.showsDescription != shows {
                         layers.showsDescription = shows
@@ -125,15 +134,23 @@ final class CanvasView: NSView {
     /// A dashed outline of each selected scrolling region's whole content area, at its scroll position.
     private let contentOutline = CAShapeLayer()
     private let emptyLabel = CATextLayer()
+    /// The layers of each region that has been mounted, made the first time it is and kept after that, so a region
+    /// that scrolls back into view costs no rebuild.
     private var regionLayers: [RegionID: RegionLayers] = [:]
     /// The screen's regions by ID, as of the last reload.
     private var regions: [RegionID: Region] = [:]
     /// Where the screen's regions are drawn, as of the last reload or scroll.
     private(set) var scrollLayout: ScrollLayout?
-    /// The frame and clip each region's layers were last given, so a scroll only updates the layers that move.
-    private var drawnRegions: [RegionID: DrawnRegion] = [:]
-    /// The regions drawn at a previewed frame.
-    private var previewedRegions: Set<RegionID> = []
+    /// The part of the screen whose regions are mounted, in screen points.
+    private var coverage: CanvasCoverage?
+    /// The regions whose boxes are in `regionsLayer`, laid out for the zoom: those in the covered rect, plus the
+    /// selection and any previewed regions. The others' layers, if they have any, are brought up to date when they
+    /// mount.
+    private var mounted: Set<RegionID> = []
+    /// `selection` as a set.
+    private var selectedIDs: Set<RegionID> = []
+    /// The drawn frames a gesture previews.
+    private var previewFrames: [RegionID: Frame] = [:]
     /// Where the trackpad scroll in progress goes, chosen when it begins and kept through its momentum.
     private var scrollRoute: ScrollRoute?
     /// Whether a press started a gesture that hasn't been released yet.
@@ -223,6 +240,11 @@ final class CanvasView: NSView {
         super.setFrameSize(newSize)
         if changed {
             needsLayout = true
+            withoutAnimation {
+                coverage = nil
+                refreshCoverage()
+                updateMounts()
+            }
             onResize?()
         }
     }
@@ -289,73 +311,155 @@ final class CanvasView: NSView {
     /// when it changed.
     private var appliedScale: CGFloat?
 
-    /// Builds the region layers again from the screen, reusing the layers of regions that are still there. Layers
-    /// whose region didn't change are left alone, so an edit costs about what it changed.
+    /// Takes the screen as it is now, keeping the layers of regions that are still there, and brings the mounted
+    /// regions up to date. Layers whose region didn't change are left alone, so an edit costs about what it changed;
+    /// regions that aren't mounted are brought up to date when they mount.
     func reload() {
         withoutAnimation {
             emptyLabel.isHidden = screen != nil
             boundsLayer.isHidden = screen == nil
-            previewedRegions = []
+            if case .frames(let frames) = preview {
+                previewFrames = frames
+            } else {
+                previewFrames = [:]
+            }
             guard let screen else {
                 regionLayers = [:]
                 regions = [:]
                 scrollLayout = nil
-                drawnRegions = [:]
+                mounted = []
                 regionsLayer.sublayers = nil
                 layoutGrid()
                 layoutOverlay()
                 return
             }
-            let bounds = screen.canvasBounds
             let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
             self.scrollLayout = layout
-            drawnRegions = [:]
-            let selected = Set(selection)
-            let scale = self.scale
-            let scaleChanged = scale != appliedScale
-            appliedScale = scale
-            var kept: [RegionID: RegionLayers] = [:]
             var regions: [RegionID: Region] = [:]
-            var boxes: [CALayer] = []
-            for region in screen.allRegions {
-                let existing = regionLayers[region.id]
-                let layers = existing ?? RegionLayers()
-                if existing == nil || scaleChanged {
+            regions.reserveCapacity(layout.index.regions.count)
+            for region in layout.index.regions {
+                regions[region.id] = region
+            }
+            self.regions = regions
+            if regionLayers.contains(where: { regions[$0.key] == nil }) {
+                regionLayers = regionLayers.filter { regions[$0.key] != nil }
+            }
+            mounted.formIntersection(regions.keys)
+            let scale = self.scale
+            if scale != appliedScale {
+                appliedScale = scale
+                for layers in regionLayers.values {
                     layers.apply(colors, scale: scale)
                 }
-                let drawn = DrawnRegion(layout, region.id)
-                layers.update(from: region, drawnFrame: drawn.frame, bounds: bounds, titleWidths: titleWidths)
-                layers.setClip(drawn.clip)
-                layers.setScrollIndicators(layout.indicators(of: region.id))
-                drawnRegions[region.id] = drawn
-                layers.isSelected = selected.contains(region.id)
-                layers.showsDescription = visibleDescriptions.contains(region.id)
-                kept[region.id] = layers
-                regions[region.id] = region
-                boxes.append(layers.box)
             }
-            regionLayers = kept
-            self.regions = regions
-            // Setting the sublayers removes and re-adds every box, so it is done only when the order changed.
-            if !(regionsLayer.sublayers ?? []).elementsEqual(boxes, by: ===) {
-                regionsLayer.sublayers = boxes
-            }
-            if case .frames(let frames) = preview {
-                showPreviewFrames(frames)
-            }
+            refreshCoverage()
+            updateMounts(syncing: true)
             layoutContent()
             layoutGrid()
         }
     }
 
+    /// Computes the covered rect again when there is none or the camera has left it. Returns whether it did.
+    @discardableResult
+    private func refreshCoverage() -> Bool {
+        let size = bounds.size
+        if let coverage, !coverage.needsRecompute(for: camera, viewSize: size) {
+            return false
+        }
+        coverage = CanvasCoverage(camera: camera, viewSize: size)
+        return true
+    }
+
+    /// Mounts the regions in the covered rect, the selection and the previewed regions, and unmounts the rest. A
+    /// region that mounts is brought up to date and laid out for the zoom; with `syncing`, as after the screen or its
+    /// scroll positions changed, regions that stay mounted are brought up to date too. Sets the boxes in draw order,
+    /// only when the list changed.
+    private func updateMounts(syncing: Bool = false) {
+        guard let layout = scrollLayout, let coverage else { return }
+        var positions = Set(layout.regions(intersecting: coverage.covered))
+        for id in selection {
+            if let position = layout.index.position(of: id) { positions.insert(position) }
+        }
+        for id in previewFrames.keys {
+            if let position = layout.index.position(of: id) { positions.insert(position) }
+        }
+        let zoom = camera.zoom
+        var mounting: Set<RegionID> = []
+        mounting.reserveCapacity(positions.count)
+        var boxes: [CALayer] = []
+        boxes.reserveCapacity(positions.count)
+        for position in positions.sorted() {
+            let id = layout.index.regions[position].id
+            let layers: RegionLayers
+            if !syncing, mounted.contains(id), let existing = regionLayers[id] {
+                layers = existing
+            } else {
+                guard let prepared = prepare(id) else { continue }
+                layers = prepared
+                if !mounted.contains(id) {
+                    layers.layoutIfNeeded(zoom: zoom)
+                }
+            }
+            mounting.insert(id)
+            boxes.append(layers.box)
+        }
+        mounted = mounting
+        // Setting the sublayers removes and re-adds every box, so it is done only when the list changed.
+        if !(regionsLayer.sublayers ?? []).elementsEqual(boxes, by: ===) {
+            regionsLayer.sublayers = boxes
+        }
+    }
+
+    /// `id`'s layers, made if it has none, brought up to date with the region, where it is drawn (at its previewed
+    /// frame while a gesture previews one), its scroll state, selection and description. Not laid out or mounted.
+    @discardableResult
+    private func prepare(_ id: RegionID) -> RegionLayers? {
+        guard let screen, let layout = scrollLayout, let region = regions[id],
+            let drawn = layout.drawn(id, previewing: previewFrames)
+        else { return nil }
+        let layers: RegionLayers
+        if let existing = regionLayers[id] {
+            layers = existing
+        } else {
+            layers = RegionLayers()
+            layers.apply(colors, scale: appliedScale ?? scale)
+            regionLayers[id] = layers
+        }
+        layers.update(from: region, drawnFrame: drawn.frame, bounds: screen.canvasBounds, titleWidths: titleWidths)
+        layers.setClip(drawn.clip)
+        layers.setScrollIndicators(layout.indicators(of: id))
+        layers.isSelected = selectedIDs.contains(id)
+        layers.showsDescription = visibleDescriptions.contains(id)
+        return layers
+    }
+
+    /// `id`'s layers laid out for the zoom, mounted or not, for tests. Makes them for a region that has none, without
+    /// mounting it.
+    private func laidOutLayers(_ id: RegionID) -> RegionLayers? {
+        if mounted.contains(id) {
+            return regionLayers[id]
+        }
+        var layers: RegionLayers?
+        withoutAnimation {
+            layers = prepare(id)
+            layers?.layoutIfNeeded(zoom: camera.zoom)
+        }
+        return layers
+    }
+
+    /// The IDs of the regions whose laid-out layers pass `test`, mounted or not, for tests.
+    private func layerIDs(where test: (RegionLayers) -> Bool) -> Set<RegionID> {
+        Set(regions.keys.filter { laidOutLayers($0).map(test) ?? false })
+    }
+
     /// The fill of `id`'s box, for tests. Nil for an unfilled region.
     func fillColor(of id: RegionID) -> CGColor? {
-        regionLayers[id]?.fillColor
+        laidOutLayers(id)?.fillColor
     }
 
     /// The corner radius of `id`'s box in view points, for tests.
     func cornerRadius(of id: RegionID) -> CGFloat? {
-        regionLayers[id]?.cornerRadius
+        laidOutLayers(id)?.cornerRadius
     }
 
     /// The sheet's corner radius in view points, for tests.
@@ -363,47 +467,53 @@ final class CanvasView: NSView {
         boundsLayer.cornerRadius
     }
 
-    /// The number of regions with a layer.
+    /// The number of regions on the screen: each has layers, or will when it first mounts.
     var regionLayerCount: Int {
-        regionLayers.count
+        regions.count
     }
 
-    /// Draws every region where the new scroll positions put it, updating only the layers that move.
+    /// The number of regions whose boxes are in the layer tree.
+    var mountedRegionCount: Int {
+        mounted.count
+    }
+
+    /// The regions whose boxes are in the layer tree, for tests.
+    var mountedRegionIDs: Set<RegionID> {
+        mounted
+    }
+
+    /// The regions whose boxes are in the layer tree, in z-order, for tests.
+    var mountedRegionOrder: [RegionID] {
+        let ids = Dictionary(uniqueKeysWithValues: regionLayers.map { (ObjectIdentifier($0.value.box), $0.key) })
+        return (regionsLayer.sublayers ?? []).compactMap { ids[ObjectIdentifier($0)] }
+    }
+
+    /// Draws the regions where the new scroll positions put them. Mounted regions are brought up to date, and only
+    /// the layers that moved are laid out again.
     private func applyScroll() {
         guard let screen else { return }
-        let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
-        self.scrollLayout = layout
-        let bounds = screen.canvasBounds
-        for (id, layers) in regionLayers {
-            let drawn = DrawnRegion(layout, id)
-            let isScrolling = regions[id]?.scroll != nil
-            guard drawn != drawnRegions[id] || isScrolling else { continue }
-            drawnRegions[id] = drawn
-            if !previewedRegions.contains(id) {
-                layers.setFrame(drawn.frame, bounds: bounds)
-                layers.setClip(drawn.clip)
-            }
-            if isScrolling {
-                layers.setScrollIndicators(layout.indicators(of: id))
-            }
-            layers.layout(zoom: camera.zoom)
+        scrollLayout = ScrollLayout(screen: screen, offsets: scrollOffsets)
+        updateMounts(syncing: true)
+        let zoom = camera.zoom
+        for id in mounted {
+            regionLayers[id]?.layoutIfNeeded(zoom: zoom)
         }
         layoutOverlay()
     }
 
     /// Where `id` is drawn, for tests.
     func drawnFrame(of id: RegionID) -> Frame? {
-        regionLayers[id]?.drawnFrame
+        laidOutLayers(id)?.drawnFrame
     }
 
     /// Whether `id` is scrolled out of view, for tests.
     func isClippedAway(_ id: RegionID) -> Bool {
-        regionLayers[id]?.isClippedAway ?? false
+        laidOutLayers(id)?.isClippedAway ?? false
     }
 
     /// How many scroll indicators `id` draws, for tests.
     func scrollIndicatorCount(of id: RegionID) -> Int {
-        regionLayers[id]?.scrollIndicatorCount ?? 0
+        laidOutLayers(id)?.scrollIndicatorCount ?? 0
     }
 
     /// Whether the dashed content outline is showing, for tests.
@@ -441,20 +551,23 @@ final class CanvasView: NSView {
         settleTimer = timer
     }
 
-    /// Fits any region text a zoom left clipped to the current zoom.
+    /// Fits any mounted region text a zoom left clipped to the current zoom. Regions that aren't mounted are fitted
+    /// when they mount.
     func settleText() {
         settleTimer?.invalidate()
         settleTimer = nil
         withoutAnimation {
-            for layers in regionLayers.values where !layers.isTextFitted {
+            for id in mounted {
+                guard let layers = regionLayers[id], !layers.isTextFitted else { continue }
                 layers.layout(zoom: camera.zoom)
             }
         }
     }
 
-    /// Whether every region's text is fitted to the zoom, for tests.
+    /// Whether every region's text is fitted to the zoom, for tests. A region that isn't mounted is fitted when it
+    /// mounts or a test asks about it.
     var isTextSettled: Bool {
-        regionLayers.values.allSatisfy(\.isTextFitted)
+        mounted.allSatisfy { regionLayers[$0]?.isTextFitted ?? true }
     }
 
     /// Sizes everything for the camera's zoom, then positions it. Regions laid out for this zoom with nothing changed
@@ -475,7 +588,8 @@ final class CanvasView: NSView {
         } else {
             viewportOutline.isHidden = true
         }
-        for layers in regionLayers.values {
+        for id in mounted {
+            guard let layers = regionLayers[id] else { continue }
             if fitsText {
                 layers.layoutIfNeeded(zoom: zoom)
             } else {
@@ -500,17 +614,17 @@ final class CanvasView: NSView {
 
     /// The regions whose layers show as selected, for tests.
     var selectedLayerIDs: Set<RegionID> {
-        Set(regionLayers.filter { $0.value.isSelected }.keys)
+        layerIDs { $0.isSelected }
     }
 
     /// The regions whose layers are drawing a description, for tests.
     var describedLayerIDs: Set<RegionID> {
-        Set(regionLayers.filter { $0.value.isShowingDescription }.keys)
+        layerIDs { $0.isShowingDescription }
     }
 
     /// The regions whose layers are drawing the link indicator, for tests.
     var linkedLayerIDs: Set<RegionID> {
-        Set(regionLayers.filter { $0.value.isShowingLinkIndicator }.keys)
+        layerIDs { $0.isShowingLinkIndicator }
     }
 
     /// Whether the resize handles are showing, for tests.
@@ -519,10 +633,10 @@ final class CanvasView: NSView {
     }
 
     private func applySelection() {
-        let selected = Set(selection)
-        for (id, layers) in regionLayers {
-            layers.isSelected = selected.contains(id)
+        for id in mounted {
+            regionLayers[id]?.isSelected = selectedIDs.contains(id)
         }
+        updateMounts()
         layoutHandles()
         layoutContentOutline()
     }
@@ -536,24 +650,17 @@ final class CanvasView: NSView {
         layoutOverlay()
     }
 
-    /// Draws the regions in `frames` (drawn frames) at those frames, and every other region that had a previewed
-    /// frame where it is drawn.
+    /// Draws the regions in `frames` (drawn frames) at those frames, keeping them mounted, and every other region that
+    /// had a previewed frame where it is drawn.
     private func showPreviewFrames(_ frames: [RegionID: Frame]) {
-        guard let screen, let layout = scrollLayout else { return }
-        let bounds = screen.canvasBounds
-        for id in previewedRegions where frames[id] == nil {
-            guard let layers = regionLayers[id], let drawn = drawnRegions[id] else { continue }
-            layers.setFrame(drawn.frame, bounds: bounds)
-            layers.setClip(drawn.clip)
-            layers.layout(zoom: camera.zoom)
+        guard scrollLayout != nil else { return }
+        let changed = Set(previewFrames.keys).union(frames.keys)
+        previewFrames = frames
+        updateMounts()
+        let zoom = camera.zoom
+        for id in changed where mounted.contains(id) {
+            prepare(id)?.layoutIfNeeded(zoom: zoom)
         }
-        for id in frames.keys {
-            guard let layers = regionLayers[id], let drawn = layout.drawn(id, previewing: frames) else { continue }
-            layers.setFrame(drawn.frame, bounds: bounds)
-            layers.setClip(drawn.clip)
-            layers.layout(zoom: camera.zoom)
-        }
-        previewedRegions = Set(frames.keys)
     }
 
     /// Lays out the region being drawn, the marquee and the handles for the camera's zoom.
@@ -604,7 +711,7 @@ final class CanvasView: NSView {
         if case .frames(let frames) = preview, let frame = frames[id] {
             return frame
         }
-        return drawnRegions[id]?.frame ?? region.frame
+        return scrollLayout?.drawnFrame(of: id) ?? region.frame
     }
 
     /// The handles' diameter, in view points, at every zoom.
@@ -851,17 +958,6 @@ final class CanvasView: NSView {
     func change(to newCamera: Camera) {
         camera = newCamera
         onCameraChange?(newCamera)
-    }
-}
-
-/// Where a region's layers draw it: its drawn frame and its clip.
-private struct DrawnRegion: Equatable {
-    var frame: Frame
-    var clip: Frame?
-
-    init(_ layout: ScrollLayout, _ id: RegionID) {
-        frame = layout.drawnFrame(of: id) ?? Frame(x: 0, y: 0, w: 0, h: 0)
-        clip = layout.clip(of: id)
     }
 }
 

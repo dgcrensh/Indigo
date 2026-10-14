@@ -5,7 +5,7 @@ Builds on the region layers from [m4-canvas-rendering.md](m4-canvas-rendering.md
 runs from [m15-canvas-responsiveness.md](m15-canvas-responsiveness.md). From the profile in `real-hardware-profile.md`
 in the project files (items 1, 2, 4 and 7), measured on a MacBook Air M1 at 60 Hz.
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

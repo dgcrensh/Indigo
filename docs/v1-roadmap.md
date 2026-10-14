@@ -33,7 +33,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 17 | Edits that cost what they change: multi-region moves, paste, undo snapshots | [m17-edit-scaling.md](plans/m17-edit-scaling.md) | 2, 9 | shipped |
 | 18 | Autosave that writes what changed | [m18-autosave-cost.md](plans/m18-autosave-cost.md) | 1, 3 | shipped |
 | 19 | A grid that pans without redrawing | [m19-grid-tiling.md](plans/m19-grid-tiling.md) | 13, 15 | shipped |
-| 20 | Lay out only what is on screen | [m20-visible-layout.md](plans/m20-visible-layout.md) | 15, 19 | draft |
+| 20 | Lay out only what is on screen | [m20-visible-layout.md](plans/m20-visible-layout.md) | 15, 19 | shipped |
 | 21 | Zoom without hitches | [m21-zoom-runs.md](plans/m21-zoom-runs.md) | 16, 20 | draft |
 | 22 | Placing many regions, and finding one, without scanning everything | [m22-placement-scaling.md](plans/m22-placement-scaling.md) | 17 | draft |
 | 23 | Autosave that skips screens nobody touched | [m23-autosave-dirty-screens.md](plans/m23-autosave-dirty-screens.md) | 18 | draft |

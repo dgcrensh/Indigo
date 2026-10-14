@@ -46,7 +46,8 @@ final class CanvasPerformanceTests: XCTestCase {
     func testStressProjectUpdatesWithinBudget() throws {
         let (canvas, screen) = try makeCanvas()
         XCTAssertEqual(canvas.regionLayerCount, 500)
-        XCTAssertEqual(canvas.regionsLayer.sublayers?.count, 500)
+        // At 100 % only the regions near the view are in the layer tree (milestone 20).
+        XCTAssertEqual(canvas.regionsLayer.sublayers?.count, canvas.mountedRegionCount)
         XCTAssertTrue(canvas.stage.contentsAreFlipped())
 
         let anchor = CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
