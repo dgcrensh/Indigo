@@ -40,9 +40,13 @@ PNGs always use the light look.
 Requirements: macOS 14, Xcode 16, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```sh
-scripts/check.sh          # core tests, format check, app build and tests
+scripts/check.sh          # core tests, format check, app icon, app build and tests
 scripts/check.sh --core   # core tests and format check only, no Xcode needed
 ```
+
+The app icon is drawn by `swift scripts/render-app-icon.swift`, which writes every size into
+`InterfaceDescriber/Assets.xcassets/AppIcon.appiconset`. Run it after changing the palette and commit the PNGs;
+`scripts/check.sh` fails if they no longer match what the script draws.
 
 To work in Xcode, run `xcodegen generate` and open `InterfaceDescriber.xcodeproj`. The project file is generated
 from `project.yml` and is not committed.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs every check a PR must pass, in order, stopping at the first failure.
 #
-#   scripts/check.sh           core tests, format check, app build and tests
+#   scripts/check.sh           core tests, format check, app icon, app build and tests
 #   scripts/check.sh --core    core tests, example project, and format check only (no Xcode needed)
 #   scripts/check.sh --no-app  same as --core
 set -euo pipefail
@@ -55,6 +55,14 @@ if [[ $run_app == 0 ]]; then
     echo "Skipped app stages (--core)."
     exit 0
 fi
+
+stage "App icon (scripts/render-app-icon.swift draws the same files twice, and they are the committed ones)"
+icon_dir=$(mktemp -d)
+swift scripts/render-app-icon.swift "$icon_dir/first" > /dev/null
+swift scripts/render-app-icon.swift "$icon_dir/second" > /dev/null
+diff -r "$icon_dir/first" "$icon_dir/second"
+diff -r "$icon_dir/first" InterfaceDescriber/Assets.xcassets/AppIcon.appiconset
+rm -rf "$icon_dir"
 
 stage "Generate Xcode project"
 xcodegen generate

@@ -1,9 +1,10 @@
 import DescriberCore
 import SwiftUI
 
-/// The screens of the project in sidebar order, with a header above each variant group (spec 8.1 and 8.3).
-/// Selecting a screen shows it; dragging reorders; the context menu renames, duplicates, groups and deletes. Under
-/// the list, the active screen's kind, viewport and scrolling (spec 8.2 and 3.4). Every change goes through the
+/// The screens of the project in sidebar order, with a header above each variant group (spec 8.1 and 8.3), each
+/// drawn as a Paper card with a thumbnail of its regions. Clicking a card shows its screen; dragging reorders; the
+/// context menu renames, duplicates, groups and deletes; a dashed card at the end adds a screen. Under the list, a
+/// card with the active screen's kind, viewport and scrolling (spec 8.2 and 3.4). Every change goes through the
 /// screen controller as a command.
 struct ScreenSidebar: View {
     @Bindable var model: DocumentModel
@@ -16,43 +17,42 @@ struct ScreenSidebar: View {
         let _ = model.revision
         let outline = SidebarOutline(project: model.project)
         VStack(spacing: 0) {
-            List(selection: selection) {
+            // No list selection: the active card draws its own accent ring instead of the system highlight.
+            List {
                 ForEach(outline.rows, id: \.self) { row in
                     switch row {
                     case .group(let index):
                         groupHeader(outline.groups[index])
+                            .paperListRow(leading: 12)
                     case .screen(let id, let group):
                         if let screen = model.project.screen(withID: id) {
-                            screenRow(screen, inGroup: group != nil)
-                                .tag(Optional(id))
+                            screenCard(screen)
+                                .paperListRow(leading: group != nil ? 20 : 10)
                         }
                     }
                 }
                 .onMove { rows, destination in
                     controller.moveRows(Array(rows), to: destination)
                 }
+                newScreenCard
+                    .paperListRow(leading: 10)
+                    .moveDisabled(true)
             }
-            .listStyle(.sidebar)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             if let screen = model.activeScreen {
-                Divider()
                 ScreenSettingsView(screen: screen, controller: controller)
+                    .paperCard()
+                    .padding(10)
             }
         }
-    }
-
-    /// Selecting a row shows its screen; clicking empty space keeps the screen showing.
-    private var selection: Binding<ScreenID?> {
-        Binding(
-            get: { model.activeScreenID },
-            set: { id in
-                if let id { model.show(id) }
-            })
+        .background(Color(nsColor: .paper { $0.chrome }))
     }
 
     private func groupHeader(_ group: VariantGroup) -> some View {
         Label(group.name, systemImage: "square.stack")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.system(.caption, design: .rounded).weight(.semibold))
+            .foregroundStyle(Color(nsColor: .paper { $0.secondaryInk }))
             .moveDisabled(true)
             .contextMenu {
                 if let member = group.screens.first {
@@ -62,24 +62,62 @@ struct ScreenSidebar: View {
             }
     }
 
-    @ViewBuilder
-    private func screenRow(_ screen: Screen, inGroup: Bool) -> some View {
-        Group {
-            if renaming == screen.id {
-                TextField("Name", text: $draftName)
-                    .focused($nameFieldFocused)
-                    .onSubmit { commitRename() }
-                    .onExitCommand { renaming = nil }
-                    .onAppear { nameFieldFocused = true }
-                    .onChange(of: nameFieldFocused) { _, focused in
-                        if !focused { commitRename() }
-                    }
-            } else {
-                Label(screen.name, systemImage: Self.symbol(for: screen.kind))
+    /// A screen's card: its thumbnail, its name, and its viewport, with an accent ring while it is showing.
+    private func screenCard(_ screen: Screen) -> some View {
+        let isActive = model.activeScreenID == screen.id
+        return HStack(spacing: 10) {
+            ScreenThumbnailView(screen: screen, revision: model.thumbnailRevision(for: screen.id))
+            VStack(alignment: .leading, spacing: 2) {
+                if renaming == screen.id {
+                    TextField("Name", text: $draftName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .focused($nameFieldFocused)
+                        .onSubmit { commitRename() }
+                        .onExitCommand { renaming = nil }
+                        .onAppear { nameFieldFocused = true }
+                        .onChange(of: nameFieldFocused) { _, focused in
+                            if !focused { commitRename() }
+                        }
+                } else {
+                    Text(screen.name)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(nsColor: .paper { $0.ink }))
+                        .lineLimit(1)
+                }
+                Text(screen.sidebarDetail(userPresets: controller.presets.user))
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(Color(nsColor: .paper { $0.secondaryInk }))
+                    .lineLimit(1)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.leading, inGroup ? 10 : 0)
+        .padding(8)
+        .paperCard(selected: isActive)
+        .contentShape(Rectangle())
+        .onTapGesture { model.show(screen.id) }
         .contextMenu { screenMenu(screen) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// The dashed card under the last screen, which adds one.
+    private var newScreenCard: some View {
+        Button {
+            controller.newScreen()
+        } label: {
+            Label("New Screen", systemImage: "plus")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(Color(nsColor: .paper { $0.secondaryInk }))
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            Color(nsColor: .paper { $0.sheetBorder }), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -122,6 +160,38 @@ struct ScreenSidebar: View {
         case .menu: "filemenu.and.selection"
         case .alert: "exclamationmark.triangle"
         }
+    }
+}
+
+extension View {
+    /// A list row with no background or separator, inset so the cards sit 8 pt apart.
+    func paperListRow(leading: CGFloat) -> some View {
+        listRowInsets(EdgeInsets(top: 4, leading: leading, bottom: 4, trailing: 10))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+
+    /// A Paper card: card color, 12 pt corners and the soft shadow, with a 2 pt accent ring when `selected`.
+    func paperCard(selected: Bool = false) -> some View {
+        background {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(nsColor: .paper { $0.card }))
+                .shadow(color: Color(nsColor: .paper { $0.sheetShadow }), radius: 5, y: 2)
+        }
+        .overlay {
+            if selected {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color(nsColor: .paper { $0.accent }), lineWidth: 2)
+            }
+        }
+    }
+
+    /// A text field on a Paper well.
+    func paperWell() -> some View {
+        textFieldStyle(.plain)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .paper { $0.well })))
     }
 }
 
@@ -183,6 +253,7 @@ struct ScreenSettingsView: View {
                         set: { controller.setSize(width: $0, height: screen.viewport.height, of: id) }),
                     format: .number.grouping(.never)
                 )
+                .paperWell()
                 Text("×")
                 TextField(
                     "Height",
@@ -191,6 +262,7 @@ struct ScreenSettingsView: View {
                         set: { controller.setSize(width: screen.viewport.width, height: $0, of: id) }),
                     format: .number.grouping(.never)
                 )
+                .paperWell()
                 Text("pt")
                     .foregroundStyle(.secondary)
             }
@@ -213,6 +285,7 @@ struct ScreenSettingsView: View {
                             get: { scroll.contentWidth }, set: { controller.setScroll(width: $0, of: id) }),
                         format: .number.grouping(.never)
                     )
+                    .paperWell()
                     Text("×")
                     TextField(
                         "Content height",
@@ -220,6 +293,7 @@ struct ScreenSettingsView: View {
                             get: { scroll.contentHeight }, set: { controller.setScroll(height: $0, of: id) }),
                         format: .number.grouping(.never)
                     )
+                    .paperWell()
                     Text("pt")
                         .foregroundStyle(.secondary)
                 }

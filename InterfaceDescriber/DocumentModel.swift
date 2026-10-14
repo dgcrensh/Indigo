@@ -35,6 +35,7 @@ final class DocumentModel {
         session = EditSession(project: project)
         activeScreenID = project.initialScreen
         screenOrder = SidebarOutline(project: project).screens
+        recordThumbnailFingerprints()
     }
 
     var project: Project {
@@ -44,6 +45,14 @@ final class DocumentModel {
     var activeScreen: Screen? {
         activeScreenID.flatMap { project.screen(withID: $0) }
     }
+
+    /// Each screen's thumbnail revision, which each sidebar card reads on its own so only the edited screen's redraws.
+    @ObservationIgnored private var thumbnailRevisions: [ScreenID: ThumbnailRevision] = [:]
+    /// What each screen's thumbnail last drew, to tell which screens an edit changed.
+    @ObservationIgnored private var thumbnailFingerprints: [ScreenID: Int] = [:]
+    @ObservationIgnored private var thumbnailTimer: Timer?
+    /// The least time between two redraws of a screen's thumbnail.
+    static let thumbnailThrottle: TimeInterval = 0.3
 
     /// The region open in the details panel, or nil while the panel is closed.
     private(set) var details: RegionEditor?
@@ -154,5 +163,56 @@ final class DocumentModel {
             }
         }
         screenOrder = SidebarOutline(project: project).screens
+        scheduleThumbnailRefresh()
     }
+
+    // MARK: Thumbnails
+
+    /// The revision `screen`'s sidebar thumbnail draws from. It changes after an edit to that screen, at most once
+    /// per `thumbnailThrottle`.
+    func thumbnailRevision(for screen: ScreenID) -> ThumbnailRevision {
+        if let revision = thumbnailRevisions[screen] {
+            return revision
+        }
+        let revision = ThumbnailRevision()
+        thumbnailRevisions[screen] = revision
+        return revision
+    }
+
+    /// Checks the thumbnails once the throttle has passed, unless a check is already waiting.
+    private func scheduleThumbnailRefresh() {
+        guard thumbnailTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.thumbnailThrottle, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.thumbnailTimer = nil
+                self?.refreshThumbnails()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        thumbnailTimer = timer
+    }
+
+    /// Bumps the thumbnail revision of each screen whose thumbnail would draw differently now.
+    func refreshThumbnails() {
+        for screen in project.screens {
+            let fingerprint = ScreenThumbnail.fingerprint(of: screen)
+            // A screen added since the last check counts as changed, in case it was edited since its card drew.
+            if thumbnailFingerprints[screen.id] != fingerprint {
+                thumbnailRevision(for: screen.id).value += 1
+            }
+            thumbnailFingerprints[screen.id] = fingerprint
+        }
+    }
+
+    private func recordThumbnailFingerprints() {
+        for screen in project.screens {
+            thumbnailFingerprints[screen.id] = ScreenThumbnail.fingerprint(of: screen)
+        }
+    }
+}
+
+/// A screen's thumbnail revision, observed by its sidebar card alone.
+@Observable
+final class ThumbnailRevision {
+    var value = 0
 }

@@ -99,3 +99,14 @@ extension Project {
         screens = order.compactMap { byID[$0] }
     }
 }
+
+extension Screen {
+    /// The line under a screen's name on its sidebar card: its viewport's short name, such as "iPhone 15", with an
+    /// overlay's kind before its size, such as "Menu · 240 × 180".
+    public func sidebarDetail(userPresets: [ViewportPreset] = []) -> String {
+        guard kind == .screen else {
+            return "\(kind.displayName) · \(viewport.width) × \(viewport.height)"
+        }
+        return ViewportPresets.shortName(for: viewport, userPresets: userPresets)
+    }
+}
