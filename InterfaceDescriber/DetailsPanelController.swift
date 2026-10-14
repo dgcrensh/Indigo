@@ -35,7 +35,6 @@ final class DetailsPanelController: NSViewController {
     let contentHeightField = NSTextField(string: "")
     private let scrollOptions = NSStackView()
     private let scrollingWell = WellStackView()
-    private var firstResponderObservation: NSKeyValueObservation?
     /// Set while the controls are filled from the model, so their change callbacks don't write back.
     private var isLoading = false
     /// Undo for typing in the panel's text fields, kept apart from the document's so Cmd-Z while typing undoes
@@ -60,6 +59,9 @@ final class DetailsPanelController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         textView.panelUndoManager = textUndoManager
         fieldEditor = makeFieldEditor()
+        textView.onFocusChange = { [weak self] in
+            self?.focusDidChange()
+        }
     }
 
     @available(*, unavailable)
@@ -71,6 +73,9 @@ final class DetailsPanelController: NSViewController {
         let editor = PanelTextView()
         editor.isFieldEditor = true
         editor.panelUndoManager = textUndoManager
+        editor.onFocusChange = { [weak self] in
+            self?.focusDidChange()
+        }
         return editor
     }
 
@@ -196,12 +201,9 @@ final class DetailsPanelController: NSViewController {
             scrollView.leadingAnchor.constraint(equalTo: card.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: card.trailingAnchor),
         ])
-        let root = PanelRootView(color: { $0.chrome })
+        let root = PaperSurfaceView(color: { $0.chrome })
         root.frame = NSRect(x: 0, y: 0, width: Self.width, height: 500)
         place(card, in: root, insets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
-        root.onWindowChange = { [weak self] window in
-            self?.observeFocus(in: window)
-        }
         view = root
         updateKeyViewLoop()
     }
@@ -218,13 +220,11 @@ final class DetailsPanelController: NSViewController {
         ])
     }
 
-    /// Rings the title's or the description's well with the accent while it has focus.
-    private func observeFocus(in window: NSWindow?) {
-        firstResponderObservation = window?.observe(\.firstResponder, options: [.initial, .new]) {
-            [weak self] _, _ in
-            DispatchQueue.main.async {
-                self?.updateWellFocus()
-            }
+    /// Rings the title's or the description's well with the accent while it has focus. The text views say when they
+    /// gain or lose focus; the ring follows once the window has settled on its first responder.
+    private func focusDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateWellFocus()
         }
     }
 
@@ -591,6 +591,20 @@ final class LinkRow: WellStackView {
 /// itself, so they reach that manager rather than the document's while it has focus.
 final class PanelTextView: NSTextView {
     weak var panelUndoManager: UndoManager?
+    /// Called after the view gains or loses focus.
+    var onFocusChange: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        onFocusChange?()
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        onFocusChange?()
+        return resigned
+    }
 
     override var undoManager: UndoManager? {
         panelUndoManager ?? super.undoManager
@@ -610,16 +624,6 @@ final class PanelTextView: NSTextView {
         case #selector(redo(_:)): return undoManager?.canRedo ?? false
         default: return super.validateUserInterfaceItem(item)
         }
-    }
-}
-
-/// The details panel's background, which says when it joins a window so the panel can follow focus there.
-private final class PanelRootView: PaperSurfaceView {
-    var onWindowChange: ((NSWindow?) -> Void)?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        onWindowChange?(window)
     }
 }
 

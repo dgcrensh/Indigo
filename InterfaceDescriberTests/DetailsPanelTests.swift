@@ -320,7 +320,7 @@ final class DetailsPanelTests: XCTestCase {
         XCTAssertEqual(chips.selectedKind, .image)
         pressEscape(in: panel, of: document)
         XCTAssertEqual(document.model.session.undoDepth, depth + 1)
-        XCTAssertEqual(document.undoManager?.undoActionName, "Edit Region")
+        XCTAssertEqual(document.undoManager?.undoActionName, "Change Kind")
         document.undoManager?.undo()
         XCTAssertEqual(region.kind, .open)
     }

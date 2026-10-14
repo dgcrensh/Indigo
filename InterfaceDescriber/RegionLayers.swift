@@ -291,14 +291,16 @@ final class RegionLayers {
     }
 
     /// Puts the link indicator inset from the top-right corner when the region has links and is big enough to
-    /// hold it.
+    /// hold it. In a short region the inset shrinks so the dot stays centered on the region's height.
     private func layoutLinkIndicator() {
         let size = Self.linkIndicatorSize
-        let inset = Self.linkIndicatorInset
-        guard hasLinks, box.bounds.width >= size + 2 * inset, box.bounds.height >= size + 2 * inset else {
+        let minimumInset: CGFloat = 2
+        guard hasLinks, box.bounds.width >= size + 2 * minimumInset, box.bounds.height >= size + 2 * minimumInset
+        else {
             linkIndicator.isHidden = true
             return
         }
+        let inset = min(Self.linkIndicatorInset, (box.bounds.height - size) / 2)
         linkIndicator.isHidden = false
         linkIndicator.frame = CGRect(x: box.bounds.width - inset - size, y: inset, width: size, height: size)
     }
