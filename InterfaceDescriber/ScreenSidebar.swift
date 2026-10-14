@@ -3,8 +3,8 @@ import SwiftUI
 
 /// The screens of the project in sidebar order, with a header above each variant group (spec 8.1 and 8.3).
 /// Selecting a screen shows it; dragging reorders; the context menu renames, duplicates, groups and deletes. Under
-/// the list, the active screen's kind and viewport (spec 8.2). Every change goes through the screen controller as a
-/// command.
+/// the list, the active screen's kind, viewport and scrolling (spec 8.2 and 3.4). Every change goes through the
+/// screen controller as a command.
 struct ScreenSidebar: View {
     @Bindable var model: DocumentModel
     let controller: ScreenController
@@ -148,7 +148,7 @@ struct ViewportChoices: View {
     }
 }
 
-/// The active screen's kind and viewport, under the screen list.
+/// The active screen's kind, viewport and scrolling, under the screen list.
 struct ScreenSettingsView: View {
     let screen: Screen
     let controller: ScreenController
@@ -193,6 +193,36 @@ struct ScreenSettingsView: View {
                 )
                 Text("pt")
                     .foregroundStyle(.secondary)
+            }
+            Toggle(
+                "Scrolls",
+                isOn: Binding(get: { screen.scroll != nil }, set: { controller.setScrolls($0, of: id) }))
+            if let scroll = screen.scroll {
+                Picker(
+                    "Axis",
+                    selection: Binding(get: { scroll.axis }, set: { controller.setScroll(axis: $0, of: id) })
+                ) {
+                    ForEach(ScrollAxis.allCases, id: \.self) { axis in
+                        Text(axis.displayName).tag(axis)
+                    }
+                }
+                HStack(spacing: 4) {
+                    TextField(
+                        "Content width",
+                        value: Binding(
+                            get: { scroll.contentWidth }, set: { controller.setScroll(width: $0, of: id) }),
+                        format: .number.grouping(.never)
+                    )
+                    Text("×")
+                    TextField(
+                        "Content height",
+                        value: Binding(
+                            get: { scroll.contentHeight }, set: { controller.setScroll(height: $0, of: id) }),
+                        format: .number.grouping(.never)
+                    )
+                    Text("pt")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .controlSize(.small)

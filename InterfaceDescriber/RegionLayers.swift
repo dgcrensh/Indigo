@@ -3,8 +3,9 @@ import DescriberCore
 import QuartzCore
 
 /// The layers that draw one region on the canvas: a box with the fill and border, the title, the description when it
-/// is shown, a link indicator when the region has links, and a tint over each part outside the canvas bounds. Frames
-/// are in zoomed screen coordinates (screen points × zoom).
+/// is shown, a link indicator when the region has links, scroll indicators when it scrolls, and a tint over each part
+/// outside the canvas bounds. Inside scrolling content the box is masked to its clip. Frames are drawn frames
+/// (`ScrollLayout`), in zoomed screen coordinates (screen points × zoom).
 final class RegionLayers {
     static let titleFont = NSFont.systemFont(ofSize: 11, weight: .medium)
     static let titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
@@ -13,6 +14,9 @@ final class RegionLayers {
     /// The link indicator's side, in view points at every zoom, and the space between it and the title.
     static let linkIndicatorSize: CGFloat = 9
     static let linkIndicatorGap: CGFloat = 3
+    /// The scroll indicators' thickness and their inset from the box's edges, in view points at every zoom.
+    static let scrollIndicatorThickness: CGFloat = 3
+    static let scrollIndicatorInset: CGFloat = 2
 
     let box = CALayer()
     let title = CATextLayer()
@@ -21,6 +25,11 @@ final class RegionLayers {
     /// A small arrow out of the top-right corner, on regions with links (spec 8.4).
     let linkIndicator = CAShapeLayer()
     private var tints: [CALayer] = []
+    /// Masks the box to its clip inside scrolling content.
+    private let clipMask = CALayer()
+    private var clip: Frame?
+    private var indicators: [ScrollLayout.Indicator] = []
+    private var indicatorLayers: [CALayer] = []
     private var frame = Frame(x: 0, y: 0, w: 0, h: 0)
     private var parts: [Frame] = []
     private var titleWidth: CGFloat = 0
@@ -51,6 +60,8 @@ final class RegionLayers {
         linkIndicator.path = Self.linkIndicatorPath
         linkIndicator.isHidden = true
         box.addSublayer(linkIndicator)
+        clipMask.anchorPoint = .zero
+        clipMask.backgroundColor = CGColor(gray: 0, alpha: 1)
     }
 
     /// An arrow pointing up and to the right, in a square `linkIndicatorSize` on a side, with the origin at the top
@@ -67,8 +78,8 @@ final class RegionLayers {
         return path
     }()
 
-    /// Takes the region's title and frame, and the parts of it outside `bounds`.
-    func update(from region: Region, bounds: Frame, titleWidths: TitleWidths) {
+    /// Takes the region's title, the frame it is drawn at, and the parts of that outside `bounds`.
+    func update(from region: Region, drawnFrame: Frame, bounds: Frame, titleWidths: TitleWidths) {
         if title.string as? String != region.title {
             title.string = region.title
         }
@@ -79,7 +90,7 @@ final class RegionLayers {
         }
         hasDescription = !description.isEmpty
         hasLinks = !region.links.isEmpty
-        setFrame(region.frame, bounds: bounds)
+        setFrame(drawnFrame, bounds: bounds)
     }
 
     private var hasDescription = false
@@ -96,6 +107,43 @@ final class RegionLayers {
     /// Whether the description layer is drawing text, for tests.
     var isShowingDescription: Bool {
         !descriptionText.isHidden
+    }
+
+    /// The frame the region is drawn at, for tests.
+    var drawnFrame: Frame {
+        frame
+    }
+
+    /// Whether the region's clip hides all of it, for tests.
+    var isClippedAway: Bool {
+        box.isHidden
+    }
+
+    /// Clips the region to `clip`, a drawn frame, or nothing when nil. A clip that leaves nothing hides the region.
+    /// Call `layout(zoom:)` afterwards.
+    func setClip(_ clip: Frame?) {
+        self.clip = clip
+    }
+
+    /// Shows a bar for each axis the region scrolls along. Call `layout(zoom:)` afterwards.
+    func setScrollIndicators(_ indicators: [ScrollLayout.Indicator]) {
+        self.indicators = indicators
+        while indicatorLayers.count < indicators.count {
+            let layer = CALayer()
+            layer.anchorPoint = .zero
+            layer.cornerRadius = Self.scrollIndicatorThickness / 2
+            layer.backgroundColor = colors?.scrollIndicator
+            box.addSublayer(layer)
+            indicatorLayers.append(layer)
+        }
+        while indicatorLayers.count > indicators.count {
+            indicatorLayers.removeLast().removeFromSuperlayer()
+        }
+    }
+
+    /// The scroll indicators being drawn, for tests.
+    var scrollIndicatorCount: Int {
+        indicatorLayers.count
     }
 
     /// Draws the region at `frame`, its own or one a gesture previews. Call `layout(zoom:)` afterwards.
@@ -134,6 +182,9 @@ final class RegionLayers {
         for tint in tints {
             tint.backgroundColor = colors.outside
         }
+        for layer in indicatorLayers {
+            layer.backgroundColor = colors.scrollIndicator
+        }
     }
 
     private func applyBorder() {
@@ -148,6 +199,8 @@ final class RegionLayers {
         for (tint, part) in zip(tints, parts) {
             tint.frame = Self.zoomed(part.offsetBy(dx: -frame.x, dy: -frame.y), zoom)
         }
+        layoutClip(zoom: zoom)
+        layoutScrollIndicators()
         let inset = Self.titleInset
         let available = box.bounds.width - 2 * inset.width
         layoutLinkIndicator()
@@ -166,6 +219,49 @@ final class RegionLayers {
             height: Self.titleHeight
         )
         layoutDescription(width: floor(available))
+    }
+
+    /// Masks the box to the part of it inside its clip, or hides it when nothing is inside.
+    private func layoutClip(zoom: Double) {
+        guard let clip else {
+            box.mask = nil
+            box.isHidden = false
+            return
+        }
+        guard let visible = frame.intersection(clip) else {
+            box.mask = nil
+            box.isHidden = true
+            return
+        }
+        box.isHidden = false
+        if visible == frame {
+            box.mask = nil
+            return
+        }
+        clipMask.frame = Self.zoomed(visible.offsetBy(dx: -frame.x, dy: -frame.y), zoom)
+        box.mask = clipMask
+    }
+
+    /// Puts each scroll indicator along the right or bottom edge, where the frame sits in the content.
+    private func layoutScrollIndicators() {
+        let thickness = Self.scrollIndicatorThickness
+        let inset = Self.scrollIndicatorInset
+        let bounds = box.bounds
+        for (indicator, layer) in zip(indicators, indicatorLayers) {
+            switch indicator.axis {
+            case .vertical:
+                let track = max(bounds.height - 2 * inset, 0)
+                layer.frame = CGRect(
+                    x: bounds.width - inset - thickness, y: inset + track * indicator.start, width: thickness,
+                    height: track * indicator.length)
+            case .horizontal:
+                let track = max(bounds.width - 2 * inset, 0)
+                layer.frame = CGRect(
+                    x: inset + track * indicator.start, y: bounds.height - inset - thickness,
+                    width: track * indicator.length, height: thickness)
+            }
+            layer.isHidden = bounds.width < 2 * inset + thickness || bounds.height < 2 * inset + thickness
+        }
     }
 
     /// Puts the link indicator in the top-right corner, level with the title, when the region has links and is big

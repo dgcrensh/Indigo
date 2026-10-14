@@ -162,6 +162,25 @@ final class ScreenController {
         setViewport(Viewport(width: width, height: height), of: id)
     }
 
+    // MARK: Scrolling (spec 3.4)
+
+    /// Turns a screen's scrolling on, as vertical with content as wide as the viewport and twice as tall, or off.
+    func setScrolls(_ scrolls: Bool, of id: ScreenID) {
+        guard let screen = project.screen(withID: id), (screen.scroll != nil) != scrolls else { return }
+        apply(ScreenCommands.setScroll(scrolls ? Scroll.defaultFor(screen.viewportFrame) : nil, of: id))
+    }
+
+    /// Changes a scrolling screen's axis or content size. The content is never smaller than the viewport.
+    func setScroll(axis: ScrollAxis? = nil, width: Int? = nil, height: Int? = nil, of id: ScreenID) {
+        guard let screen = project.screen(withID: id), let current = screen.scroll else { return }
+        let scroll = Scroll(
+            axis: axis ?? current.axis, contentWidth: width ?? current.contentWidth,
+            contentHeight: height ?? current.contentHeight
+        ).clamped(to: screen.viewportFrame)
+        guard scroll != current else { return }
+        apply(ScreenCommands.setScroll(scroll, of: id))
+    }
+
     /// The viewport of the display the window is on, measured now.
     var thisDeviceViewport: Viewport? {
         displaySize().map { ViewportPresets.thisDevice(width: $0.width, height: $0.height) }
