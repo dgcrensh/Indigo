@@ -59,11 +59,13 @@ final class DetailsPanelController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         textView.panelUndoManager = textUndoManager
         fieldEditor = makeFieldEditor()
-        textView.onFocusChange = { [weak self] in
-            self?.focusDidChange()
+        textView.onFocusChange = { [weak self] focused in
+            guard let self else { return }
+            self.setRing(on: self.descriptionWell, focused)
         }
-        titleField.onFocusChange = { [weak self] in
-            self?.focusDidChange()
+        titleField.onFocusChange = { [weak self] focused in
+            guard let self else { return }
+            self.setRing(on: self.titleWell, focused)
         }
     }
 
@@ -76,8 +78,10 @@ final class DetailsPanelController: NSViewController {
         let editor = PanelTextView()
         editor.isFieldEditor = true
         editor.panelUndoManager = textUndoManager
-        editor.onFocusChange = { [weak self] in
-            self?.focusDidChange()
+        editor.onFocusChange = { [weak self, weak editor] focused in
+            guard let self else { return }
+            // The field editor edits whichever field has focus; only the title has a well that rings.
+            self.setRing(on: self.titleWell, focused && editor?.delegate === self.titleField)
         }
         return editor
     }
@@ -223,25 +227,14 @@ final class DetailsPanelController: NSViewController {
         ])
     }
 
-    /// Rings the title's or the description's well with the accent while it has focus. The text views say when they
-    /// gain or lose focus; the ring follows once the window has settled on its first responder.
-    private func focusDidChange() {
-        DispatchQueue.main.async { [weak self] in
-            self?.updateWellFocus()
-        }
-    }
-
-    private func updateWellFocus() {
-        let responder = view.window?.firstResponder
-        let titleFocused = (responder as? NSTextView)?.delegate === titleField
-        let descriptionFocused = responder === descriptionView
-        for (well, focused) in [(titleWell, titleFocused), (descriptionWell, descriptionFocused)] {
-            well.borderWidth = 2
-            if focused {
-                well.borderColor = { $0.accent }
-            } else {
-                well.borderColor = nil
-            }
+    /// Rings a well with the accent while its field has focus. The fields and text views say when they gain or lose
+    /// it.
+    private func setRing(on well: PaperSurfaceView, _ focused: Bool) {
+        well.borderWidth = 2
+        if focused {
+            well.borderColor = { $0.accent }
+        } else {
+            well.borderColor = nil
         }
     }
 
@@ -592,11 +585,12 @@ final class LinkRow: WellStackView {
 
 /// A text field that says when it gains focus, which hands its editing to the field editor.
 final class PanelTextField: NSTextField {
-    var onFocusChange: (() -> Void)?
+    /// Called with true after the field gains focus.
+    var onFocusChange: ((Bool) -> Void)?
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        onFocusChange?()
+        if became { onFocusChange?(true) }
         return became
     }
 }
@@ -605,18 +599,18 @@ final class PanelTextField: NSTextField {
 /// itself, so they reach that manager rather than the document's while it has focus.
 final class PanelTextView: NSTextView {
     weak var panelUndoManager: UndoManager?
-    /// Called after the view gains or loses focus.
-    var onFocusChange: (() -> Void)?
+    /// Called with true after the view gains focus, and false after it loses it.
+    var onFocusChange: ((Bool) -> Void)?
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        onFocusChange?()
+        if became { onFocusChange?(true) }
         return became
     }
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
-        onFocusChange?()
+        if resigned { onFocusChange?(false) }
         return resigned
     }
 
