@@ -1,4 +1,5 @@
 import AppKit
+import DescriberCore
 
 /// The small label near the bottom center of the canvas, just above the tool pill, that confirms a mode change, such
 /// as "Region tool — R" (spec Section 4). A card-colored capsule with ink text. It never takes clicks or focus, and
