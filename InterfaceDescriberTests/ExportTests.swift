@@ -6,17 +6,20 @@ import XCTest
 
 /// Rendering screens to PNG and the File > Export items (milestone 11).
 final class ExportTests: XCTestCase {
-    /// The pixels of an image as RGBA bytes, with rows from the top.
+    /// The pixels of an image as RGBA bytes, with rows from the top. Points are screen points: the image's top-left
+    /// corner is the extent's.
     private struct Pixels {
         let width: Int
         let height: Int
         let scale: Int
+        let origin: (x: Int, y: Int)
         let bytes: [UInt8]
 
-        init(_ image: CGImage, scale: Int) throws {
+        init(_ image: CGImage, scale: Int, extent: Frame) throws {
             width = image.width
             height = image.height
             self.scale = scale
+            origin = (extent.x, extent.y)
             var bytes = [UInt8](repeating: 0, count: width * height * 4)
             let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
             let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
@@ -33,14 +36,15 @@ final class ExportTests: XCTestCase {
             self.bytes = bytes
         }
 
-        /// The color at a point in image points, from the top left.
+        /// The color at a point in screen points.
         func color(x: Int, y: Int) -> [UInt8] {
-            let offset = ((y * scale) * width + x * scale) * 4
+            let offset = (((y - origin.y) * scale) * width + (x - origin.x) * scale) * 4
             return Array(bytes[offset..<offset + 3])
         }
 
-        /// How many pixels in a rectangle of image points are darker than `threshold` (0 to 255).
-        func darkCount(in frame: Frame, threshold: Int = 160) -> Int {
+        /// How many pixels in a rectangle of screen points are darker than `threshold` (0 to 255).
+        func darkCount(in screenFrame: Frame, threshold: Int = 160) -> Int {
+            let frame = screenFrame.offsetBy(dx: -origin.x, dy: -origin.y)
             var count = 0
             for y in frame.y * scale..<frame.maxY * scale {
                 for x in frame.x * scale..<frame.maxX * scale {
@@ -78,21 +82,35 @@ final class ExportTests: XCTestCase {
     @MainActor
     private func render(_ screen: Screen, in project: Project, scale: Int = 1) throws -> Pixels {
         let image = try XCTUnwrap(ScreenImageRenderer.image(for: screen, in: project, scale: scale))
-        return try Pixels(image, scale: scale)
+        let offsets = project.editorState.screens[screen.id]?.scrollOffsets ?? [:]
+        return try Pixels(image, scale: scale, extent: ScreenImage.extent(of: screen, offsets: offsets))
+    }
+
+    /// Whether two colors are the same to within `tolerance` in each channel.
+    private func assertColor(
+        _ color: [UInt8], is expected: PaperColor, tolerance: Int = 2, _ message: String = "",
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let wanted = [expected.red, expected.green, expected.blue].map { Int(($0 * 255).rounded()) }
+        for (got, want) in zip(color.map(Int.init), wanted) where abs(got - want) > tolerance {
+            XCTFail("\(color) is not \(wanted) \(message)", file: file, line: line)
+            return
+        }
     }
 
     @MainActor
     func testTheImageIsTheScreensAreaTimesTheScale() throws {
         let (project, screen) = makeProject()
+        // The screen, with room for the sheet's shadow on every side.
         let single = try render(screen, in: project, scale: 1)
-        XCTAssertEqual([single.width, single.height], [200, 500])
+        XCTAssertEqual([single.width, single.height], [232, 532])
         let double = try render(screen, in: project, scale: 2)
-        XCTAssertEqual([double.width, double.height], [400, 1000])
+        XCTAssertEqual([double.width, double.height], [464, 1064])
 
         // A region past the right edge widens the image, and its outside part is tinted.
         screen.regions.append(Region(title: "Wide", frame: Frame(x: 150, y: 400, w: 100, h: 50)))
         let wide = try render(screen, in: project)
-        XCTAssertEqual([wide.width, wide.height], [250, 500])
+        XCTAssertEqual([wide.width, wide.height], [266, 532])
         XCTAssertNotEqual(wide.color(x: 230, y: 440), wide.color(x: 170, y: 440), "the part outside is tinted")
         XCTAssertNotEqual(wide.color(x: 230, y: 480), wide.color(x: 170, y: 480), "the background is not the bounds")
     }
@@ -132,6 +150,28 @@ final class ExportTests: XCTestCase {
         // Scrolled by 250, the row shows at y 150 inside the list.
         XCTAssertGreaterThan(scrolled.darkCount(in: Frame(x: 14, y: 152, w: 100, h: 14)), 20)
         XCTAssertEqual(scrolled.color(x: 100, y: 420), scrolled.color(x: 100, y: 480))
+    }
+
+    @MainActor
+    func testImagesUseTheLightPaperLookInEitherAppearance() throws {
+        let (project, screen) = makeProject()
+        let button = Region(title: "Go", kind: .button, frame: Frame(x: 20, y: 420, w: 160, h: 60))
+        screen.regions.append(button)
+        let previous = NSApp.appearance
+        defer { NSApp.appearance = previous }
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            let pixels = try render(screen, in: project, scale: 2)
+            let light = PaperPalette.light
+            assertColor(pixels.color(x: -16, y: -16), is: light.desk, "the corner is desk, \(appearance.rawValue)")
+            assertColor(pixels.color(x: 100, y: 330), is: light.sheet, "the middle is sheet, \(appearance.rawValue)")
+            assertColor(
+                pixels.color(x: 100, y: 465), is: light.colors(for: .button).fill,
+                "a button is the action fill, \(appearance.rawValue)")
+            // Just under the sheet's bottom edge, the shadow darkens the desk.
+            XCTAssertLessThan(
+                Int(pixels.color(x: 100, y: 503)[0]), Int((light.desk.red * 255).rounded()) - 2, "the shadow is drawn")
+        }
     }
 
     @MainActor
@@ -176,7 +216,7 @@ final class ExportTests: XCTestCase {
         let urls = try export.writePNGs(to: folder, scale: 2)
         XCTAssertEqual(urls.map(\.lastPathComponent), ["screen-1@2x.png", "screen-1-2@2x.png"])
         let menu = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: urls[1])))
-        XCTAssertEqual([menu.pixelsWide, menu.pixelsHigh], [480, 272])
-        XCTAssertEqual(menu.size, NSSize(width: 240, height: 136))
+        XCTAssertEqual([menu.pixelsWide, menu.pixelsHigh], [544, 336])
+        XCTAssertEqual(menu.size, NSSize(width: 272, height: 168))
     }
 }

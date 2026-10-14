@@ -6,7 +6,7 @@ the canvas renderer from [m4-canvas-rendering.md](m4-canvas-rendering.md), tools
 and PNG export from [m11-exports.md](m11-exports.md). [m14-paper-chrome.md](m14-paper-chrome.md) finishes the look
 with the sidebar, title bar and app icon.
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

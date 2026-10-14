@@ -26,7 +26,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 10 | Settings file and live reload | [m10-settings.md](plans/m10-settings.md) | 3 | shipped |
 | 11 | Exports: Markdown, single-file JSON, PNG | [m11-exports.md](plans/m11-exports.md) | 1 (PNG needs 4) | shipped |
 | 12 | Hardening and acceptance pass | [m12-hardening.md](plans/m12-hardening.md) | all | shipped |
-| 13 | Paper look: palette, canvas, tool pill, details card | [m13-paper-look.md](plans/m13-paper-look.md) | 12 | draft |
+| 13 | Paper look: palette, canvas, tool pill, details card | [m13-paper-look.md](plans/m13-paper-look.md) | 12 | shipped |
 | 14 | Paper chrome: sidebar cards, title bar, app icon | [m14-paper-chrome.md](plans/m14-paper-chrome.md) | 13 | draft |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:

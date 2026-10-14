@@ -219,9 +219,7 @@ final class UndoAuditTests: XCTestCase {
                 try window.model.openDetails(for: Self.logo)
                 self.type("Brand mark", into: panel.titleField, of: panel)
                 self.typeDescription("The logo, larger.", in: panel)
-                panel.kindPopUp.selectItem(at: RegionKind.allCases.firstIndex(of: .button)!)
-                NSApp.sendAction(
-                    try XCTUnwrap(panel.kindPopUp.action), to: panel.kindPopUp.target, from: panel.kindPopUp)
+                panel.kindChips.choose(.button)
                 panel.addLink(nil)
                 panel.scrollsCheckbox.state = .on
                 panel.scrollsChanged(nil)

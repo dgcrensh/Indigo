@@ -32,6 +32,9 @@ The app opens with a new untitled project. To see a filled-in one, choose File >
 `Schema/examples/acme.uidesc`. To keep the app, drag `Interface Describer.app` into Applications. It is signed
 for local use only, so a copy built on one Mac may need a right-click and Open on another.
 
+The app follows the Mac's light or dark appearance: warm paper in light mode, "night paper" in dark mode. Exported
+PNGs always use the light look.
+
 ## Building
 
 Requirements: macOS 14, Xcode 16, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).

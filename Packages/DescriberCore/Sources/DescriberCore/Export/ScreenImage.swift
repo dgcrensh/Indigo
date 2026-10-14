@@ -5,12 +5,16 @@ public enum ScreenImage {
     /// The scales a screen can be exported at.
     public static let scales = [1, 2]
 
-    /// The area of the screen, in screen points, that its image shows: the canvas bounds, widened to take in every
-    /// part of a region drawn outside them. Regions are where the scroll `offsets` draw them, and only their parts
-    /// inside their clip count, so content scrolled out of view doesn't widen the image.
+    /// The area of the screen, in screen points, that its image shows: the canvas bounds with room for the sheet's
+    /// shadow around them (`PaperShapes.shadowMargin`), widened to take in every part of a region drawn outside them.
+    /// Regions are where the scroll `offsets` draw them, and only their parts inside their clip count, so content
+    /// scrolled out of view doesn't widen the image.
     public static func extent(of screen: Screen, offsets: [RegionID: ScrollOffset] = [:]) -> Frame {
         let layout = ScrollLayout(screen: screen, offsets: offsets)
-        var extent = screen.canvasBounds
+        let bounds = screen.canvasBounds
+        let margin = PaperShapes.shadowMargin
+        var extent = Frame(
+            x: bounds.x - margin, y: bounds.y - margin, w: bounds.w + 2 * margin, h: bounds.h + 2 * margin)
         for region in screen.allRegions {
             if let visible = layout.visibleFrame(of: region.id) {
                 extent = extent.union(visible)

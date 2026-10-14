@@ -243,8 +243,7 @@ final class DetailsPanelTests: XCTestCase {
         canvas.choose(.write)
         click(canvas, at: CGPoint(x: 30, y: 30), in: document)
 
-        panel.kindPopUp.selectItem(at: RegionKind.allCases.firstIndex(of: .button)!)
-        NSApp.sendAction(try XCTUnwrap(panel.kindPopUp.action), to: panel.kindPopUp.target, from: panel.kindPopUp)
+        panel.kindChips.choose(.button)
         panel.addLink(nil)
         XCTAssertEqual(panel.linkRows.count, 1)
         type("click", into: panel.linkRows[0].triggerField, of: panel)
@@ -283,5 +282,111 @@ final class DetailsPanelTests: XCTestCase {
         XCTAssertFalse(controller.isShowingDetails)
         XCTAssertEqual(first.title, "First", "the open session is put back")
         XCTAssertEqual(document.model.activeScreen?.regions.count, 1, "then the last step is undone")
+    }
+    // MARK: Kind chips (milestone 13)
+
+    @MainActor
+    private func keyEvent(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) throws
+        -> NSEvent
+    {
+        try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
+                characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode))
+    }
+
+    @MainActor
+    func testClickingAChipSetsTheKindAsOneUndoStep() throws {
+        let (document, controller, canvas) = try makeWindow()
+        defer { controller.close() }
+        let panel = controller.detailsController
+        let window = try XCTUnwrap(controller.window)
+        let region = try addRegion(Frame(x: 16, y: 16, w: 80, h: 40), titled: "Box", to: document)
+        canvas.update()
+        try document.model.openDetails(for: region.id)
+        window.layoutIfNeeded()
+        XCTAssertEqual(panel.kindChips.selectedKind, .open)
+
+        let chips = panel.kindChips
+        let frame = try XCTUnwrap(chips.chipFrame(for: .image))
+        let click = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDown, location: chips.convert(CGPoint(x: frame.midX, y: frame.midY), to: nil),
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: 1))
+        let depth = document.model.session.undoDepth
+        chips.mouseDown(with: click)
+        XCTAssertEqual(region.kind, .image, "the canvas shows the kind while the panel is open")
+        XCTAssertEqual(chips.selectedKind, .image)
+        pressEscape(in: panel, of: document)
+        XCTAssertEqual(document.model.session.undoDepth, depth + 1)
+        XCTAssertEqual(document.undoManager?.undoActionName, "Change Kind")
+        document.undoManager?.undo()
+        XCTAssertEqual(region.kind, .open)
+    }
+
+    @MainActor
+    func testArrowsAndSpaceMoveWithinTheChipsAndNeverNudge() throws {
+        let (document, controller, canvas) = try makeWindow()
+        defer { controller.close() }
+        let panel = controller.detailsController
+        let window = try XCTUnwrap(controller.window)
+        let region = try addRegion(Frame(x: 16, y: 16, w: 80, h: 40), titled: "Box", to: document)
+        canvas.update()
+        document.model.selection = [region.id]
+        try document.model.openDetails(for: region.id)
+        let chips = panel.kindChips
+        XCTAssertTrue(window.makeFirstResponder(chips))
+        XCTAssertEqual(chips.focusedKind, .open)
+
+        chips.keyDown(with: try keyEvent(String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)), keyCode: 124))
+        XCTAssertEqual(chips.focusedKind, .container)
+        XCTAssertEqual(region.kind, .open, "moving doesn't choose")
+        XCTAssertEqual(region.frame, Frame(x: 16, y: 16, w: 80, h: 40), "Right doesn't nudge the region")
+        XCTAssertIdentical(window.firstResponder, chips)
+        let nudge = NSMenuItem(
+            title: "Nudge Right", action: #selector(DocumentWindowController.nudge(_:)), keyEquivalent: "")
+        XCTAssertFalse(controller.validateMenuItem(nudge), "the canvas's arrow keys are off while the chips have focus")
+
+        chips.keyDown(with: try keyEvent(" ", keyCode: 49))
+        XCTAssertEqual(region.kind, .container)
+        XCTAssertEqual(chips.selectedKind, .container)
+    }
+
+    @MainActor
+    func testTheChipsAreOneTabStopBetweenTheDescriptionAndTheLinks() throws {
+        let (document, controller, canvas) = try makeWindow()
+        defer { controller.close() }
+        let panel = controller.detailsController
+        let window = try XCTUnwrap(controller.window)
+        let region = try addRegion(Frame(x: 16, y: 16, w: 80, h: 40), titled: "Box", to: document)
+        canvas.update()
+        try document.model.openDetails(for: region.id)
+        panel.addLink(nil)
+        window.makeFirstResponder(panel.descriptionView)
+
+        XCTAssertTrue(panel.textView(panel.descriptionView, doCommandBy: #selector(NSResponder.insertTab(_:))))
+        XCTAssertIdentical(window.firstResponder, panel.kindChips, "Tab from the description lands on the chips")
+        panel.kindChips.keyDown(with: try keyEvent("\t", keyCode: 48))
+        let responder = try XCTUnwrap(window.firstResponder as? NSView)
+        let row = try XCTUnwrap(panel.linkRows.first)
+        let editedField = (responder as? NSTextView)?.delegate as? NSView
+        XCTAssertTrue(
+            responder.isDescendant(of: row) || editedField?.isDescendant(of: row) == true,
+            "Tab again lands on the links, not \(responder)")
+    }
+
+    @MainActor
+    func testTheFocusedFieldsWellShowsTheRing() throws {
+        let (document, controller, canvas) = try makeWindow()
+        defer { controller.close() }
+        let panel = controller.detailsController
+        let window = try XCTUnwrap(controller.window)
+        draw(canvas, from: CGPoint(x: 20, y: 20), to: CGPoint(x: 100, y: 75), in: document)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertIdentical(panel.focusedWell, panel.titleWell)
+        window.makeFirstResponder(panel.descriptionView)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertIdentical(panel.focusedWell, panel.descriptionWell)
     }
 }

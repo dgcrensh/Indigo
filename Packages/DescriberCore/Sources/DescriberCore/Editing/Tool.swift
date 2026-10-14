@@ -48,3 +48,22 @@ public enum Toast: Hashable, Sendable {
         return "\(text) — \(combo.displayString)"
     }
 }
+
+/// The tooltips of the tool pill's buttons, naming the key that does the same, such as "Region tool (R)".
+public enum ToolPillTooltip {
+    public static func text(for tool: Tool, keybinds: KeybindRegistry = .defaults) -> String {
+        withKey(tool.name, keybinds.combos(for: tool.keyAction).first)
+    }
+
+    /// The snap button's: what a click does, and what an Option-click does.
+    public static func snapping(keybinds: KeybindRegistry = .defaults) -> String {
+        let snapping = withKey("Snapping", keybinds.combos(for: .toggleSnapping).first)
+        let grid = withKey("Option-click for grid size", keybinds.combos(for: .gridSize).first)
+        return "\(snapping). \(grid)"
+    }
+
+    private static func withKey(_ text: String, _ combo: KeyCombo?) -> String {
+        guard let combo else { return text }
+        return "\(text) (\(combo.displayString))"
+    }
+}

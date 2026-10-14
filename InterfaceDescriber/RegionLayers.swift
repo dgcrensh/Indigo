@@ -2,17 +2,19 @@ import AppKit
 import DescriberCore
 import QuartzCore
 
-/// The layers that draw one region on the canvas: a box with the fill and border, the title, the description when it
-/// is shown, a link indicator when the region has links, scroll indicators when it scrolls, and a tint over each part
-/// outside the canvas bounds. Inside scrolling content the box is masked to its clip. Frames are drawn frames
+/// The layers that draw one region on the canvas: a rounded box with its kind family's fill and border, the title, the
+/// description when it is shown, a link indicator when the region has links, scroll indicators when it scrolls, and a
+/// tint over each part outside the canvas bounds. Inside scrolling content the box is masked to its clip. Frames are drawn frames
 /// (`ScrollLayout`), in zoomed screen coordinates (screen points × zoom).
 final class RegionLayers {
-    static let titleFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    static let titleFont = PaperFont.rounded(ofSize: 11, weight: .semibold)
     static let titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
     static let titleInset = CGSize(width: 4, height: 2)
-    static let descriptionFont = NSFont.systemFont(ofSize: 10)
-    /// The link indicator's side, in view points at every zoom, and the space between it and the title.
-    static let linkIndicatorSize: CGFloat = 9
+    static let descriptionFont = PaperFont.rounded(ofSize: 10)
+    /// The link indicator's diameter, its inset from the box's top-right corner, and the space between it and the
+    /// title, in view points at every zoom.
+    static let linkIndicatorSize: CGFloat = 8
+    static let linkIndicatorInset: CGFloat = 6
     static let linkIndicatorGap: CGFloat = 3
     /// The scroll indicators' thickness and their inset from the box's edges, in view points at every zoom.
     static let scrollIndicatorThickness: CGFloat = 3
@@ -22,8 +24,8 @@ final class RegionLayers {
     let title = CATextLayer()
     /// The description, read-only, under the title. Only shown with `D` (spec Section 4).
     let descriptionText = CATextLayer()
-    /// A small arrow out of the top-right corner, on regions with links (spec 8.4).
-    let linkIndicator = CAShapeLayer()
+    /// A small accent dot near the top-right corner, on regions with links (spec 8.4).
+    let linkIndicator = CALayer()
     private var tints: [CALayer] = []
     /// Masks the box to its clip inside scrolling content.
     private let clipMask = CALayer()
@@ -34,6 +36,7 @@ final class RegionLayers {
     private var parts: [Frame] = []
     private var titleWidth: CGFloat = 0
     private var colors: CanvasColors?
+    private var kind: RegionKind = .open
 
     init() {
         box.anchorPoint = .zero
@@ -53,30 +56,12 @@ final class RegionLayers {
         descriptionText.isHidden = true
         box.addSublayer(descriptionText)
         linkIndicator.anchorPoint = .zero
-        linkIndicator.fillColor = nil
-        linkIndicator.lineWidth = 1.5
-        linkIndicator.lineCap = .round
-        linkIndicator.lineJoin = .round
-        linkIndicator.path = Self.linkIndicatorPath
+        linkIndicator.cornerRadius = Self.linkIndicatorSize / 2
         linkIndicator.isHidden = true
         box.addSublayer(linkIndicator)
         clipMask.anchorPoint = .zero
         clipMask.backgroundColor = CGColor(gray: 0, alpha: 1)
     }
-
-    /// An arrow pointing up and to the right, in a square `linkIndicatorSize` on a side, with the origin at the top
-    /// left.
-    private static let linkIndicatorPath: CGPath = {
-        let size = RegionLayers.linkIndicatorSize
-        let inset: CGFloat = 1
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: inset, y: size - inset))
-        path.addLine(to: CGPoint(x: size - inset, y: inset))
-        path.move(to: CGPoint(x: size * 0.4, y: inset))
-        path.addLine(to: CGPoint(x: size - inset, y: inset))
-        path.addLine(to: CGPoint(x: size - inset, y: size * 0.6))
-        return path
-    }()
 
     /// Takes the region's title, the frame it is drawn at, and the parts of that outside `bounds`.
     func update(from region: Region, drawnFrame: Frame, bounds: Frame, titleWidths: TitleWidths) {
@@ -90,6 +75,10 @@ final class RegionLayers {
         }
         hasDescription = !description.isEmpty
         hasLinks = !region.links.isEmpty
+        if region.kind != kind {
+            kind = region.kind
+            applyFamily()
+        }
         setFrame(drawnFrame, bounds: bounds)
     }
 
@@ -107,6 +96,16 @@ final class RegionLayers {
     /// Whether the description layer is drawing text, for tests.
     var isShowingDescription: Bool {
         !descriptionText.isHidden
+    }
+
+    /// The fill the box is drawn with, for tests. Nil for an unfilled region.
+    var fillColor: CGColor? {
+        box.backgroundColor
+    }
+
+    /// The box's corner radius in view points, for tests.
+    var cornerRadius: CGFloat {
+        box.cornerRadius
     }
 
     /// The frame the region is drawn at, for tests.
@@ -171,14 +170,10 @@ final class RegionLayers {
 
     func apply(_ colors: CanvasColors, scale: CGFloat) {
         self.colors = colors
-        box.backgroundColor = colors.regionFill
-        applyBorder()
-        title.foregroundColor = colors.title
+        applyFamily()
         title.contentsScale = scale
-        descriptionText.foregroundColor = colors.description
         descriptionText.contentsScale = scale
-        linkIndicator.strokeColor = colors.link
-        linkIndicator.contentsScale = scale
+        linkIndicator.backgroundColor = colors.link
         for tint in tints {
             tint.backgroundColor = colors.outside
         }
@@ -187,8 +182,18 @@ final class RegionLayers {
         }
     }
 
+    /// Colors the box and its text in the kind's family: a `text` region gets no fill, only the border.
+    private func applyFamily() {
+        guard let colors else { return }
+        let family = colors.family(of: kind)
+        box.backgroundColor = kind.isUnfilled ? nil : family.fill
+        applyBorder()
+        title.foregroundColor = family.title
+        descriptionText.foregroundColor = family.description
+    }
+
     private func applyBorder() {
-        box.borderColor = isSelected ? colors?.selection : colors?.regionBorder
+        box.borderColor = isSelected ? colors?.accent : colors.map { $0.family(of: kind).border }
         box.borderWidth = isSelected ? 2 : 1
     }
 
@@ -196,8 +201,11 @@ final class RegionLayers {
     /// whose truncation changes.
     func layout(zoom: Double) {
         box.frame = Self.zoomed(frame, zoom)
+        let radius = PaperShapes.regionCornerRadius(width: Double(frame.w), height: Double(frame.h)) * zoom
+        box.cornerRadius = radius
         for (tint, part) in zip(tints, parts) {
             tint.frame = Self.zoomed(part.offsetBy(dx: -frame.x, dy: -frame.y), zoom)
+            Self.roundCorners(of: tint, sharedWith: box.bounds, radius: radius)
         }
         layoutClip(zoom: zoom)
         layoutScrollIndicators()
@@ -210,7 +218,9 @@ final class RegionLayers {
             return
         }
         // The title stops short of the link indicator.
-        let indicatorSpace = linkIndicator.isHidden ? 0 : Self.linkIndicatorSize + Self.linkIndicatorGap
+        let indicatorSpace =
+            linkIndicator.isHidden
+            ? 0 : Self.linkIndicatorSize + Self.linkIndicatorInset + Self.linkIndicatorGap - inset.width
         title.isHidden = false
         title.frame = CGRect(
             x: inset.width,
@@ -219,6 +229,22 @@ final class RegionLayers {
             height: Self.titleHeight
         )
         layoutDescription(width: floor(available))
+    }
+
+    /// Rounds the corners of a tint that sit on the box's own rounded corners, so the tint stays inside the box.
+    private static func roundCorners(of tint: CALayer, sharedWith bounds: CGRect, radius: CGFloat) {
+        let frame = tint.frame
+        var corners: CACornerMask = []
+        let atLeft = frame.minX <= bounds.minX
+        let atRight = frame.maxX >= bounds.maxX
+        let atTop = frame.minY <= bounds.minY
+        let atBottom = frame.maxY >= bounds.maxY
+        if atLeft && atTop { corners.insert(.layerMinXMinYCorner) }
+        if atRight && atTop { corners.insert(.layerMaxXMinYCorner) }
+        if atLeft && atBottom { corners.insert(.layerMinXMaxYCorner) }
+        if atRight && atBottom { corners.insert(.layerMaxXMaxYCorner) }
+        tint.cornerRadius = corners.isEmpty ? 0 : radius
+        tint.maskedCorners = corners
     }
 
     /// Masks the box to the part of it inside its clip, or hides it when nothing is inside.
@@ -264,18 +290,19 @@ final class RegionLayers {
         }
     }
 
-    /// Puts the link indicator in the top-right corner, level with the title, when the region has links and is big
-    /// enough to hold it.
+    /// Puts the link indicator inset from the top-right corner when the region has links and is big enough to
+    /// hold it. In a short region the inset shrinks so the dot stays centered on the region's height.
     private func layoutLinkIndicator() {
         let size = Self.linkIndicatorSize
-        let inset = Self.titleInset
-        guard hasLinks, box.bounds.width >= size + 2 * inset.width, box.bounds.height >= size + 2 * inset.height else {
+        let minimumInset: CGFloat = 2
+        guard hasLinks, box.bounds.width >= size + 2 * minimumInset, box.bounds.height >= size + 2 * minimumInset
+        else {
             linkIndicator.isHidden = true
             return
         }
+        let inset = min(Self.linkIndicatorInset, (box.bounds.height - size) / 2)
         linkIndicator.isHidden = false
-        let top = inset.height + max((Self.titleHeight - size) / 2, 0)
-        linkIndicator.frame = CGRect(x: box.bounds.width - inset.width - size, y: top, width: size, height: size)
+        linkIndicator.frame = CGRect(x: box.bounds.width - inset - size, y: inset, width: size, height: size)
     }
 
     /// Puts the description under the title, wrapped to the region's width and clipped to its height.
