@@ -1,4 +1,5 @@
 import AppKit
+import DescriberCore
 
 /// The strip across the top of the canvas shown while `settings.json` can't be used (spec 12): the error, a note that
 /// the previous settings are still in use, an Open Settings button, and a close button that hides it until the error
