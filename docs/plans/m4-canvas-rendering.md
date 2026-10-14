@@ -24,9 +24,9 @@ the editor state. It all stays smooth with 500 regions on a screen, which the mi
   lie outside them. In the core with tests.
 - Grid lines: which lines fall in the visible area, thinned to a multiple of the grid when the lines would be
   too dense to see. In the core with tests.
-- `CanvasView`, an AppKit view drawing with Core Graphics: background, viewport frame, content area and the line
-  where the viewport ends for a scrollable screen, grid, regions in z-order with truncated titles, and the
-  out-of-bounds marking. Regions outside the dirty rect are skipped.
+- `CanvasView`, an AppKit view drawing the background, viewport frame, content area and the line where the
+  viewport ends for a scrollable screen, grid, regions in z-order with truncated titles, and the out-of-bounds
+  marking. Each region is a Core Animation layer (the spike's outcome; see "Spike result").
 - Pan with two-finger scroll (and a mouse wheel), zoom with pinch about the pointer, and View menu items Zoom In
   (Cmd +, also Cmd =), Zoom Out (Cmd −) and Actual Size (Cmd 0).
 - Each screen's zoom and pan stored in `Project.editorState`, restored when the screen becomes active again or
@@ -44,7 +44,7 @@ the editor state. It all stays smooth with 500 regions on a screen, which the mi
   (milestone 7), since `D` acts on the selection, and the roadmap now says so.
 - Link indicators (milestone 8), scrolling inside a region and clipping its content (milestone 9).
 - The details panel and its zoom-to-fit animation (milestone 6). The core's `Camera.fitting` is what it will use.
-- PNG export (milestone 11), which will reuse the region drawing from this milestone.
+- PNG export (milestone 11), which can render this milestone's layer tree into a bitmap.
 - Undo for zoom and pan. They are view state, not edits, so they don't go through a command (see the open
   question on saving them).
 
@@ -53,10 +53,10 @@ the editor state. It all stays smooth with 500 regions on a screen, which the mi
 | # | Step | Touches | Depends on |
 | --- | --- | --- | --- |
 | 1 | Stress project | `Packages/DescriberCore/Sources/DescriberCore/Model/StressProject.swift` | none |
-| 2 | Spike: timed render of the stress project | `InterfaceDescriber/CanvasView.swift`, `InterfaceDescriberTests/CanvasPerformanceTests.swift` | 1 |
+| 2 | Spike: timed render of the stress project | `InterfaceDescriber/CanvasView.swift`, `InterfaceDescriber/RegionLayers.swift`, `InterfaceDescriberTests/CanvasPerformanceTests.swift` | 1 |
 | 3 | Camera | `…/Layout/Camera.swift` | none |
 | 4 | Canvas bounds, out-of-bounds parts and grid lines | `…/Layout/CanvasLayout.swift` | none |
-| 5 | Canvas view and controller | `InterfaceDescriber/CanvasView.swift`, `InterfaceDescriber/CanvasViewController.swift`, `InterfaceDescriber/DocumentModel.swift`, `InterfaceDescriber/Document.swift`, `InterfaceDescriber/DocumentWindowController.swift` | 2, 3, 4 |
+| 5 | Canvas view and controller | `InterfaceDescriber/CanvasView.swift`, `InterfaceDescriber/CanvasColors.swift`, `InterfaceDescriber/CanvasViewController.swift`, `InterfaceDescriber/DocumentModel.swift`, `InterfaceDescriber/Document.swift`, `InterfaceDescriber/DocumentWindowController.swift` | 2, 3, 4 |
 | 6 | View menu and Debug menu | `InterfaceDescriber/MainMenu.swift` | 5 |
 
 1. **Stress project.** `Project.stressTest(regionCount:)` builds one desktop screen (1440 × 900 pt) with exactly
@@ -67,9 +67,9 @@ the editor state. It all stays smooth with 500 regions on a screen, which the mi
    project round-trips through the package format.
 2. **Spike.** Before the rest of the canvas is built, draw the stress project with the region drawing the canvas
    will use (fill, border, truncated title, out-of-bounds marking) into a 1440 × 900 bitmap and time it. Target:
-   a full redraw under 8 ms on a Mac, half a 60 Hz frame. If a full redraw misses it, the fallback is one
-   `CALayer` per region (roadmap risk table). The app test asserts a loose bound (under 50 ms average over ten
-   draws) so a slow CI runner doesn't fail it, and prints the time; the result goes in this plan.
+   a frame under 8 ms on a Mac, half a 60 Hz frame. If a full redraw misses it, the fallback is one `CALayer` per
+   region (roadmap risk table). The app test asserts loose bounds so a slow CI runner doesn't fail it, and prints
+   the times; the result goes in this plan.
 3. **Camera.** `Camera` holds `zoom` and the screen point at the view's top-left (`panX`, `panY`), matching
    `ScreenEditorState`. `viewPoint(fromScreen:)`, `screenPoint(fromView:)`, `visibleRect(viewSize:)`,
    `zoomed(to:anchor:)` (clamped to 10 %–800 %, keeping the screen point under the anchor fixed),
@@ -84,12 +84,14 @@ the editor state. It all stays smooth with 500 regions on a screen, which the mi
    range, and `GridLines.drawnStep(grid:zoom:minimumSpacing:)` is the smallest multiple of the grid whose lines
    are at least 6 view points apart. Tests for each, including a region inside, straddling, and fully outside the
    frame, negative coordinates, and the scrollable-screen bounds.
-5. **Canvas view and controller.** `CanvasView` (flipped, so y grows down like screen coordinates) draws the
-   background, the canvas bounds filled and bordered, a dashed viewport outline when the screen scrolls, the
-   grid, and the regions in draw order: a translucent fill so nesting reads as depth, a hairline border, the
-   title in 11 pt at the top-left truncated to the region's width (skipped when the region is too short), and a
-   red tint over parts outside the canvas bounds. Line widths and title size stay constant in view points at
-   every zoom. `CanvasViewController` owns the camera for the active screen: on activation it restores the
+5. **Canvas view and controller.** `CanvasView` (flipped, so y grows down like screen coordinates) holds a layer
+   tree: the canvas bounds filled and bordered, a dashed viewport outline when the screen scrolls, the grid as one
+   shape layer, and one `RegionLayers` per region in draw order: a box with a translucent fill so nesting reads as
+   depth and a 1 pt border, the title in 11 pt at the top-left truncated to the region's width (hidden when the
+   region is too short), and a red tint layer over each part outside the canvas bounds. Line widths and title size
+   stay constant in view points at every zoom. Panning moves the region container; zooming resizes the layers,
+   and a title that fits keeps its natural width so it isn't redrawn. An edit rebuilds the layers, reusing those
+   of regions still on the screen. Colors follow the appearance. `CanvasViewController` owns the camera for the active screen: on activation it restores the
    saved camera or fits the viewport with 40 pt padding at up to 100 %; scroll-wheel events pan, magnify events
    zoom about the pointer, and the zoom actions use the view's center as the anchor. Every camera change is
    written to `project.editorState.screens[id]`. `DocumentModel.revision` increments when `Document` performs,
@@ -105,9 +107,18 @@ the editor state. It all stays smooth with 500 regions on a screen, which the mi
 
 ## Spike result
 
-Measured by `CanvasPerformanceTests` on the macOS 14 CI runner (a shared virtual machine, so slower than a Mac):
-a full redraw of the 500-region stress project at 1440 × 900 averaged **see the PR** ms over ten draws. Core
-Graphics drawing stays; the `CALayer` fallback isn't needed.
+Measured by `CanvasPerformanceTests` on the macOS 14 CI runner (a shared virtual machine running a debug build,
+so slower than a Mac), with the 500-region stress project in a 1440 × 900 pt view at 2×.
+
+Core Graphics, redrawing the whole view each frame, missed the target: 62 ms with everything fitted and 97 ms at
+100 %. Caching laid-out titles brought that to 41 and 68 ms. A breakdown at 100 % put about 35 ms in the
+translucent region fills, 10 in the grid, 5 to 9 in titles and 5 each in borders and the bounds; dropping
+everything but the loop took it to 1.5 ms, and a 1× bitmap halved the total. Rasterizing pixels on the CPU was
+the cost, so the canvas took the fallback: one layer per region, composited on the GPU.
+
+With layers, the main-thread work per frame on the same runner is 0.5 ms to pan, 2.6 ms to pinch with everything
+visible, 13 ms to pinch at about 100 % (where the titles that are truncated redraw as their width changes), and
+6.9 ms to rebuild after an edit. The on-Mac check below confirms pinching at 100 % stays smooth.
 
 ## Done when
 
@@ -120,7 +131,9 @@ Graphics drawing stays; the `CALayer` fallback isn't needed.
 - [ ] The parts of a frame outside the bounds cover exactly its area outside them, without overlap.
 - [ ] A scrollable screen's canvas bounds are its content area.
 - [ ] Grid lines are thinned to a multiple of the grid when they would be closer than 6 view points.
-- [ ] (App) A full render of the stress project averages under 50 ms on CI, and the time is recorded here.
+- [ ] (App) The stress project gets 500 region layers; on CI a pan frame takes under 16 ms and a pinch frame under
+  50 ms, and the times are recorded here.
+- [ ] (App) Panning moves the region layers without resizing them.
 - [ ] (App) A screen's zoom survives switching to another screen and back, and is saved in the editor state.
 - [ ] (App) The View menu has Zoom In, Zoom Out and Actual Size with Cmd +, Cmd − and Cmd 0.
 - [ ] `Schema/examples/acme.uidesc` still re-saves byte for byte.
