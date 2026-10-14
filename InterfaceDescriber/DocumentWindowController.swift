@@ -11,6 +11,7 @@ final class DocumentWindowController: NSWindowController {
     let splitViewController = NSSplitViewController()
     let canvasController: CanvasViewController
     let detailsController: DetailsPanelController
+    let screenController: ScreenController
     /// The region editor the details panel shows, to tell opening from switching. Held strongly, so a new editor
     /// can't reuse its address and look like the same one.
     private var shownDetails: RegionEditor?
@@ -18,6 +19,7 @@ final class DocumentWindowController: NSWindowController {
     init(model: DocumentModel) {
         canvasController = CanvasViewController(model: model)
         detailsController = DetailsPanelController(model: model)
+        screenController = ScreenController(model: model)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -28,7 +30,8 @@ final class DocumentWindowController: NSWindowController {
         super.init(window: window)
 
         let sidebar = NSSplitViewItem(
-            sidebarWithViewController: NSHostingController(rootView: ScreenSidebar(model: model))
+            sidebarWithViewController: NSHostingController(
+                rootView: ScreenSidebar(model: model, controller: screenController))
         )
         sidebar.isCollapsed = true
         sidebar.minimumThickness = 180
@@ -54,6 +57,11 @@ final class DocumentWindowController: NSWindowController {
         }
         detailsController.onClose = { [weak model] in
             model?.closeDetails()
+        }
+        screenController.window = window
+        screenController.anchorView = canvasController.canvasView
+        canvasController.followLinks = { [weak self] region, anchor in
+            self?.screenController.followLinks(of: region, at: anchor)
         }
     }
 
@@ -164,6 +172,154 @@ final class DocumentWindowController: NSWindowController {
 
     @objc func toggleAllDescriptions(_ sender: Any?) {
         canvasController.toggleDescriptions(all: true)
+    }
+
+    // MARK: Screens (spec 8.1 to 8.3)
+    // Each acts on the active screen. Items that pick a kind, viewport or screen carry it as the represented object.
+
+    private var activeScreen: Screen? {
+        canvasController.model.activeScreen
+    }
+
+    @objc func newScreen(_ sender: Any?) {
+        screenController.newScreen()
+    }
+
+    @objc func duplicateScreen(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.duplicateScreen(screen.id)
+    }
+
+    @objc func renameScreen(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.promptRename(screen.id)
+    }
+
+    @objc func deleteScreen(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.deleteScreen(screen.id)
+    }
+
+    @objc func setScreenKind(_ sender: Any?) {
+        guard let screen = activeScreen, let name = (sender as? NSMenuItem)?.representedObject as? String,
+            let kind = ScreenKind(rawValue: name)
+        else { return }
+        screenController.setKind(kind, of: screen.id)
+    }
+
+    @objc func setScreenViewport(_ sender: Any?) {
+        guard let screen = activeScreen,
+            let viewport = ((sender as? NSMenuItem)?.representedObject as? ViewportBox)?.viewport
+        else { return }
+        screenController.setViewport(viewport, of: screen.id)
+    }
+
+    @objc func useThisDevice(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.useThisDevice(for: screen.id)
+    }
+
+    @objc func chooseCustomViewport(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.chooseCustomSize(for: screen.id)
+    }
+
+    @objc func refreshThisDevice(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.refreshThisDevice(for: screen.id)
+    }
+
+    @objc func saveViewportPreset(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.saveViewportAsPreset(for: screen.id)
+    }
+
+    /// The New Variant items carry a viewport, or none for This Device, measured when chosen.
+    @objc func newVariant(_ sender: Any?) {
+        guard let screen = activeScreen, let item = sender as? NSMenuItem else { return }
+        let viewport = (item.representedObject as? ViewportBox)?.viewport ?? screenController.thisDeviceViewport
+        guard let viewport else { return }
+        screenController.newVariant(of: screen.id, viewport: viewport)
+    }
+
+    @objc func makeVariant(_ sender: Any?) {
+        guard let screen = activeScreen, let target = (sender as? NSMenuItem)?.representedObject as? String else {
+            return
+        }
+        screenController.makeVariant(screen.id, of: ScreenID(target))
+    }
+
+    @objc func removeFromVariantGroup(_ sender: Any?) {
+        guard let screen = activeScreen else { return }
+        screenController.removeFromVariantGroup(screen.id)
+    }
+
+    /// Fills the Viewport submenu: the presets, then This Device, Custom Size, Refresh and Save as Preset.
+    func populateViewportMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        addViewportItems(to: menu, action: #selector(setScreenViewport(_:)))
+        menu.addItem(NSMenuItem(title: "This Device", action: #selector(useThisDevice(_:)), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Custom Size…", action: #selector(chooseCustomViewport(_:)), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(
+            NSMenuItem(title: "Refresh to Current Display", action: #selector(refreshThisDevice(_:)), keyEquivalent: "")
+        )
+        menu.addItem(
+            NSMenuItem(title: "Save Viewport as Preset…", action: #selector(saveViewportPreset(_:)), keyEquivalent: ""))
+    }
+
+    /// Fills the New Variant submenu with the presets and This Device.
+    func populateNewVariantMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        addViewportItems(to: menu, action: #selector(newVariant(_:)))
+        menu.addItem(NSMenuItem(title: "This Device", action: #selector(newVariant(_:)), keyEquivalent: ""))
+    }
+
+    /// The built-in presets, then the user's, each followed by a separator.
+    private func addViewportItems(to menu: NSMenu, action: Selector) {
+        let presets = screenController.presets
+        for group in [presets.builtIn, presets.user] where !group.isEmpty {
+            for preset in group {
+                let item = NSMenuItem(title: ViewportPresets.menuTitle(for: preset), action: action, keyEquivalent: "")
+                item.representedObject = ViewportBox(preset.viewport)
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+        }
+    }
+
+    /// Fills the Make Variant Of submenu with the other screens, in sidebar order.
+    func populateMakeVariantMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let project = canvasController.model.project
+        for id in SidebarOutline(project: project).screens where id != activeScreen?.id {
+            guard let screen = project.screen(withID: id) else { continue }
+            let item = NSMenuItem(title: screen.name, action: #selector(makeVariant(_:)), keyEquivalent: "")
+            item.representedObject = id.rawValue
+            menu.addItem(item)
+        }
+    }
+
+    // MARK: Following links and moving between screens (spec 8.4 and Section 9)
+
+    @objc func goBack(_ sender: Any?) {
+        screenController.goBack()
+    }
+
+    @objc func goForward(_ sender: Any?) {
+        screenController.goForward()
+    }
+
+    @objc func followLink(_ sender: Any?) {
+        canvasController.followSelectedLink()
+    }
+
+    @objc func showNextScreen(_ sender: Any?) {
+        screenController.showNextScreen()
+    }
+
+    @objc func showPreviousScreen(_ sender: Any?) {
+        screenController.showPreviousScreen()
     }
 
     // MARK: Details panel
@@ -296,10 +452,52 @@ extension DocumentWindowController: NSMenuItemValidation {
         case #selector(deleteSelection(_:)), #selector(selectParent(_:)), #selector(selectChildren(_:)),
             #selector(nudge(_:)), #selector(toggleDescription(_:)):
             return canvasHasFocus && canvasController.hasSelection
+        case #selector(newScreen(_:)):
+            break
+        case #selector(duplicateScreen(_:)), #selector(renameScreen(_:)), #selector(chooseCustomViewport(_:)),
+            #selector(saveViewportPreset(_:)), #selector(newVariant(_:)), #selector(makeVariant(_:)):
+            return activeScreen != nil
+        case #selector(deleteScreen(_:)):
+            return activeScreen.map { screenController.canDelete($0.id) } ?? false
+        case #selector(setScreenKind(_:)):
+            let kind = (menuItem.representedObject as? String).flatMap(ScreenKind.init(rawValue:))
+            menuItem.state = activeScreen != nil && activeScreen?.kind == kind ? .on : .off
+            return activeScreen != nil
+        case #selector(setScreenViewport(_:)):
+            let viewport = (menuItem.representedObject as? ViewportBox)?.viewport
+            menuItem.state = activeScreen != nil && activeScreen?.viewport == viewport ? .on : .off
+            return activeScreen != nil
+        case #selector(useThisDevice(_:)):
+            let isThisDevice = activeScreen?.viewport.preset == ViewportPresets.thisDeviceID
+            menuItem.state = isThisDevice ? .on : .off
+            return activeScreen != nil
+        case #selector(refreshThisDevice(_:)):
+            return activeScreen?.viewport.preset == ViewportPresets.thisDeviceID
+        case #selector(removeFromVariantGroup(_:)):
+            return activeScreen.map { screenController.isInVariantGroup($0.id) } ?? false
+        case #selector(goBack(_:)):
+            return !isEditingText && screenController.canGoBack
+        case #selector(goForward(_:)):
+            return !isEditingText && screenController.canGoForward
+        case #selector(showNextScreen(_:)):
+            return !isEditingText && screenController.neighbor(offset: 1) != nil
+        case #selector(showPreviousScreen(_:)):
+            return !isEditingText && screenController.neighbor(offset: -1) != nil
+        case #selector(followLink(_:)):
+            return canvasHasFocus && canvasController.canFollowLink
         default:
             return true
         }
         // A bare-key equivalent such as R would otherwise take the key from the text being typed.
         return !(isEditingText && menuItem.keyEquivalentModifierMask.isDisjoint(with: [.command, .control]))
+    }
+}
+
+/// A viewport as a menu item's represented object.
+final class ViewportBox: NSObject {
+    let viewport: Viewport
+
+    init(_ viewport: Viewport) {
+        self.viewport = viewport
     }
 }

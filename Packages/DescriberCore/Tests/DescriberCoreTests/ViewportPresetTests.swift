@@ -19,6 +19,12 @@ final class ViewportPresetTests: XCTestCase {
             ViewportPresets.label(for: Viewport(preset: "elsewhere", width: 10, height: 20)), "elsewhere — 10 × 20")
     }
 
+    func testShortNamesForNewVariants() {
+        XCTAssertEqual(ViewportPresets.shortName(for: Viewport(preset: "ipad", width: 820, height: 1180)), "iPad")
+        XCTAssertEqual(ViewportPresets.shortName(for: ViewportPresets.thisDevice(width: 10, height: 10)), "This Device")
+        XCTAssertEqual(ViewportPresets.shortName(for: Viewport(width: 500, height: 400)), "500 × 400")
+    }
+
     func testTheNewDocumentPresetIsBuiltIn() {
         XCTAssertEqual(ViewportPresets.preset(withID: "iphone-15")?.viewport, .defaultForNewScreens)
         XCTAssertEqual(Set(ViewportPresets.builtIn.map(\.id)).count, ViewportPresets.builtIn.count)

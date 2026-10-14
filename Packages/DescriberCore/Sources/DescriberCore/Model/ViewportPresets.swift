@@ -58,6 +58,18 @@ public enum ViewportPresets {
         return "\(preset(withID: id, userPresets: userPresets)?.name ?? id) — \(size)"
     }
 
+    /// A short name for a viewport, such as "iPad", "This Device" or "500 × 400", which New Variant puts after the
+    /// screen's name.
+    public static func shortName(for viewport: Viewport, userPresets: [ViewportPreset] = []) -> String {
+        if viewport.preset == thisDeviceID {
+            return "This Device"
+        }
+        if let id = viewport.preset, let preset = preset(withID: id, userPresets: userPresets) {
+            return preset.name
+        }
+        return "\(viewport.width) × \(viewport.height)"
+    }
+
     /// The menu title of a preset, such as "iPhone 15 (393 × 852)".
     public static func menuTitle(for preset: ViewportPreset) -> String {
         "\(preset.name) (\(preset.width) × \(preset.height))"

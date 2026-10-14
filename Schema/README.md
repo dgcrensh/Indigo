@@ -41,6 +41,9 @@ Acme.uidesc/
 - Screen `kind`: `screen`, `modal`, `sheet`, `popover`, `menu`, `alert`.
 - Region `kind`: `container`, `text`, `image`, `button`, `input`, `toggle`, `picker`, `list`, `navigation`,
   `menu-item`, or absent for an open region.
+- `viewport.preset`: a built-in preset (`iphone-se`, `iphone-15`, `iphone-15-pro-max`, `ipad`, `ipad-pro-13`,
+  `laptop`, `desktop`), `this-device` for a size measured from the author's display, or the slug of a preset the
+  author saved in the app's settings. Absent for a custom size. `width` and `height` are always the real size.
 - `scroll.axis`: `vertical`, `horizontal`, `both`. The content area starts at the frame's origin and is
   `contentWidth` × `contentHeight`; children of a scrolling region must fit in it rather than in the frame.
 

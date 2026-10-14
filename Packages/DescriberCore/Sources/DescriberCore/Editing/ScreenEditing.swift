@@ -145,3 +145,17 @@ public struct NavigationHistory: Equatable, Sendable {
         return nil
     }
 }
+
+extension ScreenKind {
+    /// The name the Kind menus show, such as "Popover".
+    public var displayName: String {
+        switch self {
+        case .screen: "Screen"
+        case .modal: "Modal"
+        case .sheet: "Sheet"
+        case .popover: "Popover"
+        case .menu: "Menu"
+        case .alert: "Alert"
+        }
+    }
+}

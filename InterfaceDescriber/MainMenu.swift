@@ -11,6 +11,8 @@ enum MainMenu {
         mainMenu.addItem(submenuItem(fileMenu()))
         mainMenu.addItem(submenuItem(editMenu()))
         mainMenu.addItem(submenuItem(viewMenu()))
+        mainMenu.addItem(submenuItem(screenMenu()))
+        mainMenu.addItem(submenuItem(goMenu()))
         mainMenu.addItem(submenuItem(toolsMenu()))
         let windowMenu = windowMenu()
         mainMenu.addItem(submenuItem(windowMenu))
@@ -189,6 +191,62 @@ enum MainMenu {
         return menu
     }
 
+    /// Screen management (spec 8.1 to 8.3). The Viewport, New Variant and Make Variant Of submenus are filled from
+    /// the frontmost document window each time they open.
+    private static func screenMenu() -> NSMenu {
+        let menu = NSMenu(title: "Screen")
+        typealias Controller = DocumentWindowController
+        menu.addItem(withTitle: "New Screen", action: #selector(Controller.newScreen(_:)), keyEquivalent: "")
+        menu.addItem(
+            withTitle: "Duplicate Screen", action: #selector(Controller.duplicateScreen(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Rename Screen…", action: #selector(Controller.renameScreen(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Delete Screen…", action: #selector(Controller.deleteScreen(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+        let kinds = NSMenu(title: "Kind")
+        for kind in ScreenKind.allCases {
+            let item = kinds.addItem(
+                withTitle: kind.displayName, action: #selector(Controller.setScreenKind(_:)), keyEquivalent: "")
+            item.representedObject = kind.rawValue
+        }
+        menu.addItem(submenuItem(kinds))
+        menu.addItem(submenuItem(dynamicMenu("Viewport") { $0.populateViewportMenu($1) }))
+        menu.addItem(.separator())
+        menu.addItem(submenuItem(dynamicMenu("New Variant") { $0.populateNewVariantMenu($1) }))
+        menu.addItem(submenuItem(dynamicMenu("Make Variant Of") { $0.populateMakeVariantMenu($1) }))
+        menu.addItem(
+            withTitle: "Remove from Variant Group", action: #selector(Controller.removeFromVariantGroup(_:)),
+            keyEquivalent: "")
+        return menu
+    }
+
+    /// Link following and moving between screens (spec 8.4 and Section 9).
+    private static func goMenu() -> NSMenu {
+        let menu = NSMenu(title: "Go")
+        typealias Controller = DocumentWindowController
+        addItem(to: menu, "Back", action: #selector(Controller.goBack(_:)), keybind: .back)
+        addItem(to: menu, "Forward", action: #selector(Controller.goForward(_:)), keybind: .forward)
+        menu.addItem(.separator())
+        addItem(to: menu, "Follow Link", action: #selector(Controller.followLink(_:)), keybind: .followLink)
+        menu.addItem(.separator())
+        addItem(to: menu, "Next Screen", action: #selector(Controller.showNextScreen(_:)), keybind: .nextScreen)
+        addItem(
+            to: menu, "Previous Screen", action: #selector(Controller.showPreviousScreen(_:)), keybind: .previousScreen)
+        return menu
+    }
+
+    /// Keeps the delegates of the submenus filled when they open, since a menu holds its delegate weakly.
+    private static var fillers: [DynamicMenuFiller] = []
+
+    private static func dynamicMenu(
+        _ title: String, fill: @escaping (DocumentWindowController, NSMenu) -> Void
+    ) -> NSMenu {
+        let menu = NSMenu(title: title)
+        let filler = DynamicMenuFiller(fill: fill)
+        fillers.append(filler)
+        menu.delegate = filler
+        return menu
+    }
+
     /// The tools, snapping and the grid. Their keys have no modifiers, so the window controller turns them off while
     /// text is being edited.
     private static func toolsMenu() -> NSMenu {
@@ -235,5 +293,23 @@ enum MainMenu {
             keyEquivalent: ""
         )
         return menu
+    }
+}
+
+/// Fills a submenu from the frontmost document window just before it opens.
+@MainActor
+final class DynamicMenuFiller: NSObject, NSMenuDelegate {
+    let fill: (DocumentWindowController, NSMenu) -> Void
+
+    init(fill: @escaping (DocumentWindowController, NSMenu) -> Void) {
+        self.fill = fill
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let controller = NSApp.mainWindow?.windowController as? DocumentWindowController else {
+            menu.removeAllItems()
+            return
+        }
+        fill(controller, menu)
     }
 }
