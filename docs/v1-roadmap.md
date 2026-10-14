@@ -30,6 +30,8 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 14 | Paper chrome: sidebar cards, title bar, app icon | [m14-paper-chrome.md](plans/m14-paper-chrome.md) | 13 | shipped |
 | 15 | Canvas responsiveness: edits and pinch | [m15-canvas-responsiveness.md](plans/m15-canvas-responsiveness.md) | 4, 12 | shipped |
 | 16 | Sidebar and zoom animation responsiveness | [m16-chrome-responsiveness.md](plans/m16-chrome-responsiveness.md) | 15 | shipped |
+| 17 | Edits that cost what they change: multi-region moves, paste, undo snapshots | [m17-edit-scaling.md](plans/m17-edit-scaling.md) | 2, 9 | reviewed |
+| 18 | Autosave that writes what changed | [m18-autosave-cost.md](plans/m18-autosave-cost.md) | 1, 3 | reviewed |
 
 Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can run at the same time:
 
@@ -63,6 +65,10 @@ Milestones 0 → 1 → 2 → 3 are the critical path. After that, two tracks can
   as a rounded sheet, regions tinted by kind family, a fixed indigo accent, a night paper dark mode, a clickable
   tool pill, the details panel and sidebar as cards, screen thumbnails, and an app icon. Chosen from three mocked
   directions in the project thread; 13 is the canvas and panel, 14 the window chrome.
+- **17 and 18. Core responsiveness.** From the perf profile of the core in a cloud session
+  (`scripts/bench.sh --profile`). 17 makes moving, pasting and shrinking many regions cost one layout per command
+  instead of one per region, and records undo for what changed rather than the whole screen; 18 skips writing
+  unchanged screens on autosave and speeds up the JSON writer. Independent of each other.
 
 ---
 
