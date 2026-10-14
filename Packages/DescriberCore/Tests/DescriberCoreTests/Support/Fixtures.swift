@@ -56,3 +56,41 @@ enum Fixtures {
         return (Project(name: "Test", screens: [screen]), screen)
     }
 }
+
+extension Fixtures {
+    /// Everything the project would write, for comparing before and after an edit.
+    static func bytes(_ project: Project) -> PackageTree {
+        ProjectPackage.write(project: project).tree
+    }
+
+    /// A screen with an outer region containing an inner one, and a separate sibling:
+    ///
+    ///     outer  (0, 0, 200 × 200)
+    ///       inner  (20, 20, 100 × 100)
+    ///     side   (300, 0, 100 × 100)
+    static func nestedProject() -> (project: Project, screen: Screen, outer: Region, inner: Region, side: Region) {
+        let inner = Region(id: RegionID("inner"), title: "Inner", frame: Frame(x: 20, y: 20, w: 100, h: 100))
+        let outer = Region(
+            id: RegionID("outer"),
+            title: "Outer",
+            frame: Frame(x: 0, y: 0, w: 200, h: 200),
+            children: [inner]
+        )
+        let side = Region(id: RegionID("side"), title: "Side", frame: Frame(x: 300, y: 0, w: 100, h: 100))
+        let screen = Screen(
+            id: ScreenID("00000000-0000-4000-8000-000000000001"),
+            name: "Home",
+            viewport: Viewport(width: 400, height: 800),
+            regions: [outer, side]
+        )
+        return (Project(name: "Test", screens: [screen]), screen, outer, inner, side)
+    }
+
+    /// Titles of the screen's regions as an outline, such as `["Outer", "  Inner", "Side"]`.
+    static func outline(_ screen: Screen) -> [String] {
+        func walk(_ regions: [Region], depth: Int) -> [String] {
+            regions.flatMap { [String(repeating: "  ", count: depth) + $0.title] + walk($0.children, depth: depth + 1) }
+        }
+        return walk(screen.regions, depth: 0)
+    }
+}
