@@ -186,8 +186,10 @@ final class SelectionEditingTests: XCTestCase {
         step(document, canvas) { canvas.reorderSelection(to: .front) }
         XCTAssertEqual(login.regions.map(\.id), [form, footer, logo])
         XCTAssertEqual(document.undoManager?.undoActionName, "Bring to Front")
-        step(document, canvas) { canvas.reorderSelection(to: .front) }
+        // Outside an undo group, since an empty group would still count as an undo step in the test's manager.
+        canvas.reorderSelection(to: .front)
         XCTAssertEqual(document.model.session.undoDepth, 1, "a region already in front records nothing")
+        XCTAssertEqual(document.undoManager?.undoActionName, "Bring to Front")
         document.model.selection = [footer]
         step(document, canvas) { canvas.reorderSelection(to: .back) }
         XCTAssertEqual(login.regions.map(\.id), [footer, form, logo])
