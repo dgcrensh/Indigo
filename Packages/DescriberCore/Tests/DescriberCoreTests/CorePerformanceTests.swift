@@ -165,4 +165,56 @@ final class CorePerformanceTests: XCTestCase {
         }
         XCTAssertLessThan(moveAll, 1500)
     }
+
+    /// Select all and nudge one point, and select all and drop a drag, at 2,000 and 5,000 regions. Each is performed
+    /// and undone.
+    func testNudgeAndDropOfEverythingWithinBudget() throws {
+        for count in [2000, 5000] {
+            let project = Project.stressTest(regionCount: count)
+            let screen = try XCTUnwrap(project.screens.first)
+            let session = EditSession(project: project)
+            let everything = screen.allRegions.map(\.id)
+            let nudge = try time("perform and undo a select-all nudge", regions: count, iterations: 5) {
+                try session.perform(MoveRegions(screen: screen.id, regions: everything, dx: 1, dy: 0))
+                try session.undo()
+            }
+
+            let target = try XCTUnwrap(screen.allRegions.first { $0.children.isEmpty && $0.frame.w >= 8 })
+            let press = CGPoint(x: Double(target.frame.x) + 4, y: Double(target.frame.y) + 4)
+            let context = GestureContext(screen: screen, tool: .select, selection: everything)
+            var gesture = CanvasGesture(pressAt: press, context: context)
+            gesture.drag(to: CGPoint(x: press.x + 40, y: press.y + 24))
+            let drop = try XCTUnwrap(gesture.release(at: CGPoint(x: press.x + 40, y: press.y + 24)))
+            let dropTime = try time("perform and undo dropping a select-all drag", regions: count, iterations: 5) {
+                try session.perform(drop)
+                try session.undo()
+            }
+            XCTAssertLessThan(nudge, 1500)
+            XCTAssertLessThan(dropTime, 1500)
+        }
+    }
+
+    /// What the details panel does on each keystroke: finding the open region, on the first and on the last of 40
+    /// screens of 300 regions.
+    func testRegionLookupOnTheLastOfFortyScreensWithinBudget() throws {
+        let project = Project.stressTest(regionCount: 300, screenCount: 40)
+        let first = try XCTUnwrap(project.screens.first)
+        let last = try XCTUnwrap(project.screens.last)
+        let firstRegion = try XCTUnwrap(first.allRegions.last).id
+        let lastRegion = try XCTUnwrap(last.allRegions.last).id
+        let onFirst = time("find a region on the first of 40 screens", regions: 12000, iterations: 200) {
+            _ = project.region(withID: firstRegion)
+        }
+        let onLast = time("find a region on the last of 40 screens", regions: 12000, iterations: 200) {
+            _ = project.region(withID: lastRegion)
+        }
+        let onLastWithScreen = time(
+            "find a region on the last of 40 screens, given the screen", regions: 12000, iterations: 200
+        ) {
+            _ = project.region(withID: lastRegion, onScreen: last.id)
+        }
+        XCTAssertLessThan(onFirst, 50)
+        XCTAssertLessThan(onLast, 50)
+        XCTAssertLessThan(onLastWithScreen, 50)
+    }
 }

@@ -59,11 +59,19 @@ extension Project {
     /// The region with `id` on any screen, and the screen it is on.
     public func region(withID id: RegionID) -> (region: Region, screen: Screen)? {
         for screen in screens {
-            if let region = RegionIndex(screen: screen).region(id) {
+            if let region = screen.region(withID: id) {
                 return (region, screen)
             }
         }
         return nil
+    }
+
+    /// The region with `id`, looked for on the screen `hint` first, where it usually is, then on every screen.
+    public func region(withID id: RegionID, onScreen hint: ScreenID) -> (region: Region, screen: Screen)? {
+        if let screen = screen(withID: hint), let region = screen.region(withID: id) {
+            return (region, screen)
+        }
+        return region(withID: id)
     }
 
     func requireRegion(_ id: RegionID) throws -> Region {

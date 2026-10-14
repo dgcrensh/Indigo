@@ -4,7 +4,7 @@ How milestone 22 of the [v1 roadmap](../v1-roadmap.md) is built, a core mileston
 placement from [m17-edit-scaling.md](m17-edit-scaling.md). From the profile in `real-hardware-profile.md` in the
 project files (items 3 and 5). Independent of milestones 20 and 21.
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 
@@ -63,7 +63,9 @@ screens a keystroke costs 5.1 ms instead of 1.0 ms on the first.
    `area` from the entry, and the region's `scroll` and `id` only for a region whose content area contains the frame.
 2. **Grid of candidates.** `ScrollLayout` builds a `PlacementGrid` lazily on first use by `placement`, so layouts
    used only for drawing don't pay for it. A frame's candidates are the union of its cells' lists, merged in draw
-   order, with the excluded subtree skipped by draw-order range as today. The randomized reference check from
+   order, with the excluded subtree skipped by draw-order range as today. As built, the grid is made on a layout's
+   second placement rather than its first: a layout rebuilt after every re-parenting placement (a resize shedding
+   rows, a paste) places once and is cheaper scanned, so small edits cost what they did. The randomized reference check from
    milestone 17 (`ParentingEquivalenceTests`) runs with the grid and must agree on
    every screen; add a case with regions larger than a cell, regions outside the canvas bounds and negative
    coordinates.
@@ -98,4 +100,4 @@ screens a keystroke costs 5.1 ms instead of 1.0 ms on the first.
 
 | Question | Default if unanswered | Answer |
 | --- | --- | --- |
-| Cell size of the candidate grid? | 256 pt, about one container in the stress project. Tune from the benchmark. | |
+| Cell size of the candidate grid? | 256 pt, about one container in the stress project. Tune from the benchmark. | 256 pt. Content areas spanning more than 64 cells go in one list every cell shares. |

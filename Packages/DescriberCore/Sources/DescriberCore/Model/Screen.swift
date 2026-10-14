@@ -33,6 +33,16 @@ public final class Screen {
         Region.depthFirst(regions)
     }
 
+    /// The region with `id` on this screen, found by walking the tree until it turns up, building nothing.
+    public func region(withID id: RegionID) -> Region? {
+        var pending = regions.reversed() as [Region]
+        while let region = pending.popLast() {
+            if region.id == id { return region }
+            pending.append(contentsOf: region.children.reversed())
+        }
+        return nil
+    }
+
     /// A deep copy with the same IDs.
     public func copy() -> Screen {
         Screen(

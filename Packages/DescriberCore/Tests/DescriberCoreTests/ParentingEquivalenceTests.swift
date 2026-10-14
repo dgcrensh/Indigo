@@ -10,12 +10,13 @@ final class ParentingEquivalenceTests: XCTestCase {
     /// Applies `command` to one copy of the screen for `seed` and `reference` to another, and compares the trees.
     private func assertSameTrees(
         seed: UInt64,
+        desk: Frame = RandomScreen.canvasDesk,
         _ make: (RandomScreen, inout SeededGenerator) -> (command: Command, reference: (Project) throws -> Void)?,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let subject = RandomScreen(seed: seed)
-        let reference = RandomScreen(seed: seed)
+        let subject = RandomScreen(seed: seed, desk: desk)
+        let reference = RandomScreen(seed: seed, desk: desk)
         var random = SeededGenerator(seed: seed &+ 1_000_000)
         guard let (command, applyReference) = make(subject, &random) else { return }
         let result = Result { _ = try command.apply(to: subject.project) }
@@ -35,24 +36,87 @@ final class ParentingEquivalenceTests: XCTestCase {
         }
     }
 
+    /// A random selection of `subject`, moved by up to 300 points.
+    private static func randomMove(
+        of subject: RandomScreen, using random: inout SeededGenerator
+    ) -> (command: Command, reference: (Project) throws -> Void) {
+        let all = subject.screen.allRegions
+        var selection = (0..<random.int(1...20)).map { _ in all.randomElement(using: &random)!.id }
+        if random.chance(0.3), let parent = all.first(where: { !$0.children.isEmpty }) {
+            // A parent and its child together: the child moves once, with its parent.
+            selection += [parent.id, parent.children.randomElement(using: &random)!.id]
+        }
+        let layout = ScrollLayout(screen: subject.screen, offsets: subject.offsets)
+        if random.chance(0.5), let hidden = all.first(where: { layout.visibleFrame(of: $0.id) == nil }) {
+            selection.append(hidden.id)
+        }
+        selection.shuffle(using: &random)
+        let command = MoveRegions(
+            screen: subject.screen.id, regions: selection, dx: random.int(-300...300),
+            dy: random.int(-300...300), grid: random.chance(0.25) ? 8 : nil, scrollOffsets: subject.offsets)
+        return (command, { try ReferenceCommands.apply(command, to: $0) })
+    }
+
     func testMovingASelectionMatchesTheReference() {
         for seed in seeds {
-            assertSameTrees(seed: seed) { subject, random in
+            assertSameTrees(seed: seed) { subject, random in Self.randomMove(of: subject, using: &random) }
+        }
+    }
+
+    /// Regions far outside the canvas, at negative coordinates, many cells of the placement grid wide, and scrolling
+    /// content too large for the grid's cells.
+    func testMovingASelectionOnAWideDeskMatchesTheReference() {
+        for seed in seeds {
+            assertSameTrees(seed: seed, desk: RandomScreen.wideDesk) { subject, random in
+                Self.randomMove(of: subject, using: &random)
+            }
+        }
+    }
+
+    /// Single placements of random frames, against the reference's full scan: frames inside, across and outside the
+    /// canvas, larger than a cell, exactly some region's content area, empty and with a negative size, before and
+    /// after a region is appended to a layout whose grid is built.
+    func testPlacementsMatchTheReference() {
+        for seed in seeds {
+            for desk in [RandomScreen.canvasDesk, RandomScreen.wideDesk] {
+                let subject = RandomScreen(seed: seed, desk: desk)
+                var random = SeededGenerator(seed: seed &+ 2_000_000)
+                var layout = ScrollLayout(screen: subject.screen, offsets: subject.offsets)
                 let all = subject.screen.allRegions
-                var selection = (0..<random.int(1...20)).map { _ in all.randomElement(using: &random)!.id }
-                if random.chance(0.3), let parent = all.first(where: { !$0.children.isEmpty }) {
-                    // A parent and its child together: the child moves once, with its parent.
-                    selection += [parent.id, parent.children.randomElement(using: &random)!.id]
+                func check(_ step: String) {
+                    for _ in 0..<40 {
+                        let drawn: Frame
+                        switch random.int(0...5) {
+                        case 0:
+                            let region = all.randomElement(using: &random)!
+                            drawn = layout.drawnContentArea(of: region.id)!
+                        case 1:
+                            drawn = Frame(x: random.int(-5000...7000), y: random.int(-4000...6000), w: 0, h: 0)
+                        case 2:
+                            drawn = Frame(
+                                x: random.int(-2000...2000), y: random.int(-2000...2000),
+                                w: random.int(-300...(-1)), h: random.int(-300...300))
+                        default:
+                            drawn = RandomScreen.frame(in: desk, using: &random)
+                        }
+                        let excluding = random.chance(0.5) ? all.randomElement(using: &random)!.id : nil
+                        let keeping = random.chance(0.3) ? all.first { $0.scroll != nil }?.id : nil
+                        XCTAssertEqual(
+                            Parenting.placement(
+                                forDrawn: drawn, excluding: excluding, layout: layout, keeping: keeping),
+                            ReferenceCommands.placement(
+                                forDrawn: drawn, excluding: excluding, layout: layout, keeping: keeping),
+                            "\(drawn) \(step), seed \(seed)")
+                    }
                 }
-                let layout = ScrollLayout(screen: subject.screen, offsets: subject.offsets)
-                if random.chance(0.5), let hidden = all.first(where: { layout.visibleFrame(of: $0.id) == nil }) {
-                    selection.append(hidden.id)
-                }
-                selection.shuffle(using: &random)
-                let command = MoveRegions(
-                    screen: subject.screen.id, regions: selection, dx: random.int(-300...300),
-                    dy: random.int(-300...300), grid: random.chance(0.25) ? 8 : nil, scrollOffsets: subject.offsets)
-                return (command, { try ReferenceCommands.apply(command, to: $0) })
+                check("before appending")
+                let appended = Region(
+                    id: RegionID("00000000-0000-4000-8000-999999999999"), title: "Appended",
+                    frame: RandomScreen.frame(in: desk, using: &random),
+                    scroll: Scroll(axis: .both, contentWidth: 20000, contentHeight: 20000))
+                subject.screen.regions.append(appended)
+                layout.appendTopLevel(appended)
+                check("after appending")
             }
         }
     }

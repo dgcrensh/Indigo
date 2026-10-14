@@ -41,19 +41,26 @@ public enum Parenting {
         if let excluding, let position = index.position(of: excluding) {
             skipped = position..<(index[position: position].subtreeEnd + 1)
         }
+        let kept = keeping.flatMap(index.position(of:))
         var best: (position: Int, area: Int)?
-        for range in [regions.startIndex..<skipped.lowerBound, skipped.upperBound..<regions.endIndex] {
-            for position in range {
-                let region = regions[position]
-                guard layout.drawnContentArea(at: position).contains(drawn) else { continue }
-                if region.scroll != nil, region.id != keeping {
-                    guard layout.drawnFrame(at: position).intersects(drawn) else { continue }
-                }
-                // Later in the walk draws on top, so `<=` lets an equal-size later region win the tie.
-                let area = region.frame.area
-                if let current = best, current.area < area { continue }
-                best = (position, area)
+        // In draw order, so `<=` lets an equal-size region drawn later, on top, win the tie.
+        func consider(_ position: Int) {
+            let entry = layout.entry(at: position)
+            guard entry.drawnContent.contains(drawn) else { return }
+            if position != kept, regions[position].scroll != nil {
+                guard entry.drawn.intersects(drawn) else { return }
             }
+            if let current = best, current.area < entry.area { return }
+            best = (position, entry.area)
+        }
+        // A frame with a negative size can be held by a content area away from its origin, so it checks them all.
+        if drawn.w >= 0, drawn.h >= 0, let grid = layout.placementGrid() {
+            grid.forEachCandidate(atX: drawn.x, y: drawn.y) { position in
+                if !skipped.contains(position) { consider(position) }
+            }
+        } else {
+            for position in regions.startIndex..<skipped.lowerBound { consider(position) }
+            for position in skipped.upperBound..<regions.endIndex { consider(position) }
         }
         let parent = best.map { regions[$0.position].id }
         return Placement(parent: parent, frame: layout.fileFrame(forDrawn: drawn, inParent: parent))

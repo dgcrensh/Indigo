@@ -32,11 +32,17 @@ struct SeededGenerator: RandomNumberGenerator {
 /// overlapping and equal-size siblings, a few regions outside their parent's content, and scrolling regions with
 /// saved offsets, some past the end of their content. The same seed always gives the same screen and IDs.
 struct RandomScreen {
+    /// Where top-level regions go by default: the canvas and a little below it.
+    static let canvasDesk = Frame(x: 0, y: 0, w: 1440, h: 1200)
+    /// A desk reaching far outside the canvas on every side, into negative coordinates, so regions span many cells of
+    /// the placement grid and scrolling content can be larger than the grid puts in cells.
+    static let wideDesk = Frame(x: -4000, y: -3000, w: 10000, h: 8000)
+
     let project: Project
     let screen: Screen
     let offsets: [RegionID: ScrollOffset]
 
-    init(seed: UInt64) {
+    init(seed: UInt64, desk: Frame = canvasDesk) {
         var random = SeededGenerator(seed: seed)
         let screen = Screen(
             id: ScreenID("00000000-0000-4000-8000-000000000777"), name: "Random",
@@ -44,7 +50,6 @@ struct RandomScreen {
         let count = random.int(50...300)
         var placed: [(region: Region, depth: Int)] = []
         var offsets: [RegionID: ScrollOffset] = [:]
-        let desk = Frame(x: 0, y: 0, w: 1440, h: 1200)
 
         for number in 1...count {
             let candidates = placed.filter { $0.depth < 5 && $0.region.contentArea.w >= 8 }
