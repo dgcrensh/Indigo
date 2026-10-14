@@ -42,7 +42,8 @@ final class CanvasViewController: NSViewController {
     private var gridPopover: NSPopover?
     /// The camera, and whether it was fitted, from before the details panel opened, to go back to when it closes.
     private var cameraBeforeDetails: (camera: Camera, isFitted: Bool)?
-    private var cameraAnimation: Timer?
+    /// The camera animation in progress, stepped by the canvas's display link so each step lands on a frame.
+    private var cameraAnimation: CameraAnimation?
     /// Follows the links of a region, given a point in the canvas view to show a menu at when it has several. The
     /// window controller sets this to its screen controller.
     var followLinks: ((RegionID, CGPoint) -> Void)?
@@ -312,31 +313,31 @@ final class CanvasViewController: NSViewController {
             completion?()
             return
         }
-        let began = CACurrentMediaTime()
-        let duration = Self.cameraAnimationDuration
-        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                guard let self else {
-                    timer.invalidate()
-                    return
-                }
-                let t = min((CACurrentMediaTime() - began) / duration, 1)
-                let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-                self.canvasView.camera = Camera.interpolated(
-                    from: start, to: target, fraction: eased, viewSize: self.canvasView.bounds.size)
-                if t >= 1 {
-                    timer.invalidate()
-                    self.cameraAnimation = nil
-                    completion?()
-                }
-            }
+        let link = canvasView.displayLink(target: self, selector: #selector(stepCameraAnimation(_:)))
+        cameraAnimation = CameraAnimation(
+            start: start, target: target, began: CACurrentMediaTime(), completion: completion, link: link)
+        link.add(to: .main, forMode: .common)
+    }
+
+    /// Moves the camera to where the animation is at the time of the frame being drawn.
+    @objc private func stepCameraAnimation(_ link: CADisplayLink) {
+        guard let animation = cameraAnimation, animation.link === link else {
+            link.invalidate()
+            return
         }
-        RunLoop.main.add(timer, forMode: .common)
-        cameraAnimation = timer
+        let t = min(max((link.targetTimestamp - animation.began) / Self.cameraAnimationDuration, 0), 1)
+        let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+        canvasView.camera = Camera.interpolated(
+            from: animation.start, to: animation.target, fraction: eased, viewSize: canvasView.bounds.size)
+        if t >= 1 {
+            link.invalidate()
+            cameraAnimation = nil
+            animation.completion?()
+        }
     }
 
     private func stopCameraAnimation() {
-        cameraAnimation?.invalidate()
+        cameraAnimation?.link.invalidate()
         cameraAnimation = nil
     }
 
@@ -640,6 +641,16 @@ final class CanvasViewController: NSViewController {
         canvasView.preview = gesture.preview
         canvasView.selection = gesture.selection
     }
+}
+
+/// A camera animation: where it goes from and to, when it began, what runs at the end, and the display link
+/// stepping it.
+private struct CameraAnimation {
+    var start: Camera
+    var target: Camera
+    var began: CFTimeInterval
+    var completion: (() -> Void)?
+    var link: CADisplayLink
 }
 
 extension CanvasViewController: CanvasInteraction {
