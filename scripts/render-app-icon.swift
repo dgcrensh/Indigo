@@ -44,16 +44,21 @@ func drawIcon(in context: CGContext) {
     context.setShadow(offset: CGSize(width: 0, height: 12), blur: 24, color: color(0x000000, alpha: 0.25))
     context.addPath(groundPath)
     context.setFillColor(accent)
-    context.fillPath()
+    context.drawPath(using: .fill)
     context.restoreGState()
     // A deeper band at the bottom of the ground, for depth.
+    // (Masked with destination-in rather than clipped: the script runs in the interpreter, which can't find the
+    // CoreGraphics overlay's clip and fill functions on the CI runner.)
     context.saveGState()
-    context.addPath(groundPath)
-    context.clip()
+    context.beginTransparencyLayer(auxiliaryInfo: nil)
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
     let gradient = CGGradient(colorsSpace: space, colors: [accent, accentDeep] as CFArray, locations: [0, 1])!
     context.drawLinearGradient(
         gradient, start: CGPoint(x: 512, y: 100), end: CGPoint(x: 512, y: 924), options: [])
+    context.setBlendMode(.destinationIn)
+    context.addPath(groundPath)
+    context.drawPath(using: .fill)
+    context.endTransparencyLayer()
     context.restoreGState()
 
     // The sheet, tilted a little, with its shadow.
@@ -67,7 +72,7 @@ func drawIcon(in context: CGContext) {
     context.setShadow(offset: CGSize(width: 0, height: 18), blur: 36, color: color(0x1F1C19, alpha: 0.35))
     context.addPath(sheetPath)
     context.setFillColor(sheet)
-    context.fillPath()
+    context.drawPath(using: .fill)
     context.restoreGState()
     context.addPath(sheetPath)
     context.setStrokeColor(sheetBorder)
@@ -78,7 +83,7 @@ func drawIcon(in context: CGContext) {
         let path = CGPath(roundedRect: region.frame, cornerWidth: 22, cornerHeight: 22, transform: nil)
         context.addPath(path)
         context.setFillColor(region.fill)
-        context.fillPath()
+        context.drawPath(using: .fill)
         context.addPath(path)
         context.setStrokeColor(index == selected ? accent : region.border)
         context.setLineWidth(index == selected ? 14 : 6)
