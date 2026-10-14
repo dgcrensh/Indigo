@@ -304,3 +304,39 @@ final class CanvasGestureTests: XCTestCase {
         XCTAssertNil(draw.0.detailsRequest, "a drawn region opens through its CreateRegion")
     }
 }
+
+extension CanvasGestureTests {
+    private func linkedFixture() -> Nested {
+        let fixture = Fixtures.nestedProject()
+        fixture.inner.links = [Link(screen: ScreenID("target"))]
+        return fixture
+    }
+
+    func testACommandClickOnALinkedRegionAsksToFollowIt() {
+        let fixture = linkedFixture()
+        var gesture = CanvasGesture(
+            pressAt: CGPoint(x: 50, y: 50), modifiers: .command, context: context(fixture, selection: [fixture.side.id])
+        )
+        let command = gesture.release(at: CGPoint(x: 50, y: 50))
+        XCTAssertNil(command)
+        XCTAssertEqual(gesture.linkRequest, fixture.inner.id)
+        XCTAssertEqual(gesture.selection, [fixture.inner.id])
+    }
+
+    func testACommandClickOnAnUnlinkedRegionSelectsIt() {
+        let fixture = linkedFixture()
+        var gesture = CanvasGesture(pressAt: CGPoint(x: 350, y: 50), modifiers: .command, context: context(fixture))
+        _ = gesture.release(at: CGPoint(x: 350, y: 50))
+        XCTAssertNil(gesture.linkRequest)
+        XCTAssertEqual(gesture.selection, [fixture.side.id])
+    }
+
+    func testACommandDragOnALinkedRegionMovesNothing() {
+        let fixture = linkedFixture()
+        let (gesture, command) = gesture(
+            context(fixture), from: CGPoint(x: 50, y: 50), to: CGPoint(x: 90, y: 90), modifiers: .command)
+        XCTAssertNil(command)
+        XCTAssertNil(gesture.linkRequest)
+        XCTAssertEqual(gesture.preview, .none)
+    }
+}
