@@ -737,8 +737,9 @@ final class CanvasView: NSView {
         fitQueuedText()
     }
 
-    /// Fits the queued regions' text, nearest the view's center first, until `budget` seconds have passed. Regions
-    /// that unmounted since are skipped: they are fitted when they mount. Returns whether any text is left to fit.
+    /// Fits the queued regions' text, nearest the view's center first, until `budget` seconds have passed. Each fitted
+    /// title is drawn here rather than in the commit, as the drawing is most of the cost and the budget has to see it.
+    /// Regions that unmounted since are skipped: they are fitted when they mount. Returns whether any text is left.
     @discardableResult
     func fitQueuedText(budget: CFTimeInterval = textFitBudget) -> Bool {
         let start = CACurrentMediaTime()
@@ -746,6 +747,7 @@ final class CanvasView: NSView {
             while let id = textQueue.popLast() {
                 if mounted.contains(id), let layers = regionLayers[id] {
                     layers.layoutIfNeeded(zoom: layoutZoom)
+                    layers.displayTextIfNeeded()
                 }
                 if CACurrentMediaTime() - start >= budget { break }
             }

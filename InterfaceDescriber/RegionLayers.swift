@@ -255,6 +255,13 @@ final class RegionLayers {
         }
     }
 
+    /// Draws the title and description now if their layout marked them for display, rather than in the next commit,
+    /// so the caller can count the drawing against a time budget.
+    func displayTextIfNeeded() {
+        title.displayIfNeeded()
+        descriptionText.displayIfNeeded()
+    }
+
     /// Whether the title and description were last sized for the zoom they are drawn at, for tests.
     var isTextFitted: Bool {
         textFitted
