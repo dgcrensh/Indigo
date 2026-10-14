@@ -1,0 +1,231 @@
+import Foundation
+
+/// Adds a new, empty screen.
+public struct AddScreen: Command {
+    public let actionName = "New Screen"
+    /// The screen to add. Created with the command so the caller knows its ID.
+    public let screen: Screen
+    /// Position in the sidebar, or nil for the end.
+    public let index: Int?
+
+    public init(name: String, kind: ScreenKind = .screen, viewport: Viewport, at index: Int? = nil) {
+        self.screen = Screen(name: name, kind: kind, viewport: viewport)
+        self.index = index
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        guard project.screen(withID: screen.id) == nil else { throw EditError.nothingToDo }
+        let index = self.index ?? project.screens.count
+        guard (0...project.screens.count).contains(index) else { throw EditError.indexOutOfRange(index) }
+        let before = ProjectStructure(project: project)
+        project.screens.insert(screen, at: index)
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Duplicates a screen just after the original, with new IDs throughout. Links inside the copy keep pointing at
+/// their original targets. The copy is not added to a variant group.
+public struct DuplicateScreen: Command {
+    public let actionName = "Duplicate Screen"
+    public let source: ScreenID
+    /// The copy's ID, chosen when the command is created.
+    public let newID: ScreenID
+    public let name: String?
+
+    /// `name` defaults to the original's name followed by "Copy".
+    public init(_ source: ScreenID, name: String? = nil, newID: ScreenID = .make()) {
+        self.source = source
+        self.name = name
+        self.newID = newID
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let original = try project.requireScreen(source)
+        guard project.screen(withID: newID) == nil else { throw EditError.nothingToDo }
+        let before = ProjectStructure(project: project)
+        let copy = ScreenCommands.copy(original, id: newID, name: name ?? "\(original.name) Copy")
+        project.screens.insert(copy, at: project.screens.firstIndex { $0 === original }! + 1)
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Moves a screen to a new position in the sidebar.
+public struct ReorderScreen: Command {
+    public let actionName = "Move Screen"
+    public let screen: ScreenID
+    /// The screen's position after the move.
+    public let index: Int
+
+    public init(_ screen: ScreenID, to index: Int) {
+        self.screen = screen
+        self.index = index
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let target = try project.requireScreen(screen)
+        guard project.screens.indices.contains(index) else { throw EditError.indexOutOfRange(index) }
+        let before = ProjectStructure(project: project)
+        project.screens.removeAll { $0 === target }
+        project.screens.insert(target, at: index)
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Deletes a screen, removes every link to it from other screens, and drops it from its variant group (removing
+/// the group if it ends up empty). Undo restores all three.
+public struct DeleteScreen: Command {
+    public let actionName = "Delete Screen"
+    public let screen: ScreenID
+
+    public init(_ screen: ScreenID) {
+        self.screen = screen
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let target = try project.requireScreen(screen)
+        let linking = ScreenCommands.incomingLinks(to: screen, in: project).compactMap {
+            project.region(withID: $0.region)?.region
+        }
+        let before = ProjectStructure(project: project, linksOf: linking)
+        for region in linking {
+            region.links.removeAll { $0.screen == screen }
+        }
+        project.screens.removeAll { $0 === target }
+        project.variantGroups = ScreenCommands.removing([screen], from: project.variantGroups)
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Duplicates a screen into the same variant group with a new viewport, creating the group if the screen has none.
+/// The copy is placed after the group's last screen in the sidebar.
+public struct NewVariant: Command {
+    public let actionName = "New Variant"
+    public let source: ScreenID
+    public let viewport: Viewport
+    public let newID: ScreenID
+    public let name: String?
+
+    /// `name` defaults to the original's name followed by the viewport preset or size in parentheses.
+    public init(of source: ScreenID, viewport: Viewport, name: String? = nil, newID: ScreenID = .make()) {
+        self.source = source
+        self.viewport = viewport
+        self.name = name
+        self.newID = newID
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        let original = try project.requireScreen(source)
+        guard project.screen(withID: newID) == nil else { throw EditError.nothingToDo }
+        let before = ProjectStructure(project: project)
+
+        let label = viewport.preset ?? "\(viewport.width) × \(viewport.height)"
+        let copy = ScreenCommands.copy(original, id: newID, name: name ?? "\(original.name) (\(label))")
+        copy.viewport = viewport
+        // The copy goes right after the group's last screen in the sidebar, so variants stay together.
+        let group = project.variantGroups.firstIndex { $0.screens.contains(source) }
+        let members = group.map { project.variantGroups[$0].screens } ?? [source]
+        let last = project.screens.lastIndex { members.contains($0.id) }!
+        project.screens.insert(copy, at: last + 1)
+        if let group {
+            project.variantGroups[group].screens.append(newID)
+        } else {
+            project.variantGroups.append(VariantGroup(name: original.name, screens: [source, newID]))
+        }
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Groups screens as variants of one another. Screens already in another group leave it first.
+public struct GroupVariants: Command {
+    public let actionName = "Group Variants"
+    public let screens: [ScreenID]
+    public let name: String
+
+    public init(_ screens: [ScreenID], name: String) {
+        self.screens = screens
+        self.name = name
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        for id in screens {
+            _ = try project.requireScreen(id)
+        }
+        var unique: [ScreenID] = []
+        for id in screens where !unique.contains(id) {
+            unique.append(id)
+        }
+        guard unique.count >= 2 else { throw EditError.nothingToDo }
+        let before = ProjectStructure(project: project)
+        project.variantGroups = ScreenCommands.removing(unique, from: project.variantGroups)
+        project.variantGroups.append(VariantGroup(name: name, screens: unique))
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Dissolves the variant group a screen belongs to. The screens themselves are untouched.
+public struct UngroupVariants: Command {
+    public let actionName = "Ungroup Variants"
+    public let screen: ScreenID
+
+    public init(containing screen: ScreenID) {
+        self.screen = screen
+    }
+
+    public func apply(to project: Project) throws -> Command {
+        guard let group = project.variantGroups.firstIndex(where: { $0.screens.contains(screen) }) else {
+            throw EditError.nothingToDo
+        }
+        let before = ProjectStructure(project: project)
+        project.variantGroups.remove(at: group)
+        return RestoreStructure(actionName: actionName, structure: before)
+    }
+}
+
+/// Commands that set one field of a screen, and queries the screen UI needs.
+public enum ScreenCommands {
+    public static func rename(_ screen: ScreenID, to name: String) -> Command {
+        SetScreenValue(actionName: "Rename Screen", screen: screen, keyPath: \.name, value: name)
+    }
+
+    public static func setKind(_ kind: ScreenKind, of screen: ScreenID) -> Command {
+        SetScreenValue(actionName: "Change Screen Kind", screen: screen, keyPath: \.kind, value: kind)
+    }
+
+    /// Changes the frame drawn on the canvas and the saved value. Regions are untouched (spec 8.2).
+    public static func setViewport(_ viewport: Viewport, of screen: ScreenID) -> Command {
+        SetScreenValue(actionName: "Change Viewport", screen: screen, keyPath: \.viewport, value: viewport)
+    }
+
+    public static func setScroll(_ scroll: Scroll?, of screen: ScreenID) -> Command {
+        SetScreenValue(actionName: "Change Scrolling", screen: screen, keyPath: \.scroll, value: scroll)
+    }
+
+    /// Regions on other screens that link to `screen`, which would lose those links if it were deleted. Used for
+    /// the delete confirmation (milestone 8).
+    public static func incomingLinks(to screen: ScreenID, in project: Project) -> [(screen: ScreenID, region: RegionID)]
+    {
+        project.screens.filter { $0.id != screen }.flatMap { source in
+            source.allRegions.filter { $0.links.contains { $0.screen == screen } }.map { (source.id, $0.id) }
+        }
+    }
+
+    static func copy(_ screen: Screen, id: ScreenID, name: String) -> Screen {
+        Screen(
+            id: id,
+            name: name,
+            kind: screen.kind,
+            viewport: screen.viewport,
+            scroll: screen.scroll,
+            regions: screen.regions.map { $0.copyWithNewIDs() }
+        )
+    }
+
+    /// `groups` with `screens` taken out, dropping groups left empty.
+    static func removing(_ screens: [ScreenID], from groups: [VariantGroup]) -> [VariantGroup] {
+        groups.compactMap { group in
+            var group = group
+            group.screens.removeAll { screens.contains($0) }
+            return group.screens.isEmpty ? nil : group
+        }
+    }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "6b0d549b-6f03-475a-9600-a35a099950d8",
+  "name": "Account Menu",
+  "kind": "menu",
+  "viewport": {
+    "width": 240,
+    "height": 136
+  },
+  "regions": [
+    {
+      "id": "13deef86-ab10-41d0-b646-e1f40a097c97",
+      "title": "Signed in as",
+      "kind": "text",
+      "x": 12,
+      "y": 8,
+      "w": 216,
+      "h": 36,
+      "description": "The user's name and email, not clickable."
+    },
+    {
+      "id": "ca02135e-92b1-43f2-8ede-0d7ac3baea9e",
+      "title": "Settings",
+      "kind": "menu-item",
+      "x": 4,
+      "y": 52,
+      "w": 232,
+      "h": 36,
+      "description": "",
+      "linksTo": [
+        {
+          "screen": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+          "screenName": "Settings"
+        }
+      ]
+    },
+    {
+      "id": "57124242-5051-41cc-917f-9acae01f5057",
+      "title": "Sign out",
+      "kind": "menu-item",
+      "x": 4,
+      "y": 92,
+      "w": 232,
+      "h": 36,
+      "description": "Signs out without confirming.",
+      "linksTo": [
+        {
+          "screen": "6513270e-269e-4d37-b2a7-4de452e6b438",
+          "screenName": "Login",
+          "trigger": "click"
+        }
+      ]
+    }
+  ]
+}

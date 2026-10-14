@@ -2,7 +2,7 @@
 
 How milestone 0 of the [v1 roadmap](../v1-roadmap.md) is built. Builds on nothing.
 
-**Status:** draft
+**Status:** shipped
 
 ## Goal
 

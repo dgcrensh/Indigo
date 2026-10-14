@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dgcrensh/Indigo/Schema/uidesc-1.schema.json",
+  "title": "Interface Describer package, schema version 1",
+  "description": "Validates project.json and the screen files in a .uidesc package. A file matches exactly one of the two shapes. See Schema/README.md and docs/app-spec.md section 3.",
+  "oneOf": [
+    { "$ref": "#/$defs/project" },
+    { "$ref": "#/$defs/screen" }
+  ],
+  "$defs": {
+    "id": {
+      "description": "A lowercase UUID.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "project": {
+      "description": "project.json, the package manifest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "name", "units", "screens"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "name": { "type": "string" },
+        "units": { "const": "points" },
+        "screens": {
+          "description": "Screens in sidebar order. name and file are derived and rewritten on every save.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "file"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "name": { "type": "string" },
+              "file": { "type": "string", "pattern": "^screens/[a-z0-9-]+\\.json$" }
+            }
+          }
+        },
+        "variantGroups": {
+          "description": "Omitted when there are none.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "screens"],
+            "properties": {
+              "name": { "type": "string" },
+              "screens": { "type": "array", "items": { "$ref": "#/$defs/id" } }
+            }
+          }
+        }
+      }
+    },
+    "screen": {
+      "description": "One file in screens/.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "viewport", "regions"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "kind": { "enum": ["screen", "modal", "sheet", "popover", "menu", "alert"] },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "preset": { "type": "string" },
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "scroll": { "$ref": "#/$defs/scroll" },
+        "regions": { "type": "array", "items": { "$ref": "#/$defs/region" } }
+      }
+    },
+    "region": {
+      "description": "A rectangle on a screen. Coordinates are absolute points from the screen origin, even for children.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "x", "y", "w", "h", "description"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string" },
+        "kind": {
+          "description": "Omitted when the region is open.",
+          "enum": ["container", "text", "image", "button", "input", "toggle", "picker", "list", "navigation", "menu-item"]
+        },
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "w": { "type": "integer", "minimum": 4 },
+        "h": { "type": "integer", "minimum": 4 },
+        "description": { "type": "string" },
+        "scroll": { "$ref": "#/$defs/scroll" },
+        "linksTo": {
+          "description": "Omitted when empty.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/link" }
+        },
+        "children": {
+          "description": "Omitted when empty. Later children draw on top.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/region" }
+        }
+      }
+    },
+    "scroll": {
+      "description": "Scrolling content. The content area starts at the frame's origin.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["axis", "contentWidth", "contentHeight"],
+      "properties": {
+        "axis": { "enum": ["vertical", "horizontal", "both"] },
+        "contentWidth": { "type": "integer", "minimum": 1 },
+        "contentHeight": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["screen"],
+      "properties": {
+        "screen": { "$ref": "#/$defs/id" },
+        "screenName": { "description": "Derived: the target screen's name, rewritten on every save.", "type": "string" },
+        "trigger": { "type": "string" }
+      }
+    }
+  }
+}

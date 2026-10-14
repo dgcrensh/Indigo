@@ -1,0 +1,88 @@
+{
+  "id": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+  "name": "Settings",
+  "kind": "screen",
+  "viewport": {
+    "preset": "iphone-15",
+    "width": 393,
+    "height": 852
+  },
+  "regions": [
+    {
+      "id": "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb",
+      "title": "Navigation bar",
+      "kind": "navigation",
+      "x": 0,
+      "y": 48,
+      "w": 393,
+      "h": 52,
+      "description": "Large title 'Settings'.",
+      "children": [
+        {
+          "id": "57ee05cd-e009-42c7-bebf-f20686734721",
+          "title": "Account button",
+          "kind": "button",
+          "x": 337,
+          "y": 56,
+          "w": 40,
+          "h": 36,
+          "description": "Avatar of the signed-in user.",
+          "linksTo": [
+            {
+              "screen": "6b0d549b-6f03-475a-9600-a35a099950d8",
+              "screenName": "Account Menu",
+              "trigger": "click"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9be4bcfc-49b6-4a08-b2e6-cc3ababced20",
+      "title": "Settings list",
+      "kind": "list",
+      "x": 0,
+      "y": 100,
+      "w": 393,
+      "h": 752,
+      "description": "Grouped list. Rows push their own screens (not described yet).",
+      "scroll": {
+        "axis": "vertical",
+        "contentWidth": 393,
+        "contentHeight": 1200
+      },
+      "children": [
+        {
+          "id": "830e07bc-1e39-4f10-92bd-4acefaecbd38",
+          "title": "Notifications row",
+          "kind": "toggle",
+          "x": 16,
+          "y": 116,
+          "w": 361,
+          "h": 44,
+          "description": "Toggle for push notifications."
+        },
+        {
+          "id": "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8",
+          "title": "Appearance row",
+          "kind": "picker",
+          "x": 16,
+          "y": 168,
+          "w": 361,
+          "h": 44,
+          "description": "Picker: System, Light, Dark."
+        },
+        {
+          "id": "6bf46c69-7d2c-4f82-aeea-cbe226e87555",
+          "title": "About section",
+          "kind": "container",
+          "x": 16,
+          "y": 1000,
+          "w": 361,
+          "h": 180,
+          "description": "Below the fold: version, licenses, and support links."
+        }
+      ]
+    }
+  ]
+}

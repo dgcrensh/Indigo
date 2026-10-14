@@ -1,0 +1,56 @@
+name: InterfaceDescriber
+options:
+  bundleIdPrefix: com.dgcrensh
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+packages:
+  DescriberCore:
+    path: Packages/DescriberCore
+targets:
+  InterfaceDescriber:
+    type: application
+    platform: macOS
+    sources:
+      - path: InterfaceDescriber
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: DescriberCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dgcrensh.interface-describer
+        PRODUCT_NAME: Interface Describer
+        PRODUCT_MODULE_NAME: InterfaceDescriber
+        INFOPLIST_FILE: InterfaceDescriber/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+  InterfaceDescriberTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: InterfaceDescriberTests
+    dependencies:
+      - target: InterfaceDescriber
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dgcrensh.interface-describer.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Interface Describer.app/Contents/MacOS/Interface Describer"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  InterfaceDescriber:
+    build:
+      targets:
+        InterfaceDescriber: all
+        InterfaceDescriberTests: [test]
+    test:
+      targets:
+        - InterfaceDescriberTests
