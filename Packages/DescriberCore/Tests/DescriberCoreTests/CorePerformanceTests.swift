@@ -21,13 +21,15 @@ final class CorePerformanceTests: XCTestCase {
     }
 
     /// Runs `body` `iterations` times, prints the average and returns it in milliseconds.
-    private func time(_ name: String, iterations: Int, _ body: () throws -> Void) rethrows -> Double {
+    private func time(
+        _ name: String, regions: Int = 500, iterations: Int, _ body: () throws -> Void
+    ) rethrows -> Double {
         let start = Date()
         for _ in 0..<iterations {
             try body()
         }
         let milliseconds = Date().timeIntervalSince(start) / Double(iterations) * 1000
-        print(String(format: "Core, 500 regions, %@: %.3f ms", name, milliseconds))
+        print(String(format: "Core, %d regions, %@: %.3f ms", regions, name, milliseconds))
         return milliseconds
     }
 
@@ -86,5 +88,45 @@ final class CorePerformanceTests: XCTestCase {
         XCTAssertLessThan(encode, 200)
         XCTAssertLessThan(fingerprint, 20)
         XCTAssertLessThan(thumbnail, 20)
+    }
+
+    /// Edits that touch many regions at once: everything selected and nudged, a container shrunk so its rows fall out,
+    /// and two dozen containers pasted. Each is performed and undone.
+    func testBulkEditsWithinBudget() throws {
+        let session = EditSession(project: project)
+        let everything = screen.allRegions.map(\.id)
+        let moveAll = try time("perform and undo a select-all move", iterations: 20) {
+            try session.perform(MoveRegions(screen: screen.id, regions: everything, dx: 8, dy: 0))
+            try session.undo()
+        }
+
+        let container = try XCTUnwrap(screen.regions.first)
+        var shrunk = container.frame
+        shrunk.h = 12
+        let shed = try time("perform and undo a resize shedding 5 rows", iterations: 20) {
+            try session.perform(ResizeRegion(screen: screen.id, region: container.id, frame: shrunk))
+            try session.undo()
+        }
+
+        let copies = Array(screen.regions.prefix(24))
+        let paste = try time("perform and undo pasting 24 containers", iterations: 10) {
+            try session.perform(PasteRegions(screen: screen.id, regions: copies))
+            try session.undo()
+        }
+        XCTAssertLessThan(moveAll, 50)
+        XCTAssertLessThan(shed, 50)
+        XCTAssertLessThan(paste, 50)
+    }
+
+    func testSelectAllMoveOnFiveThousandRegionsWithinBudget() throws {
+        let project = Project.stressTest(regionCount: 5000)
+        let screen = try XCTUnwrap(project.screens.first)
+        let session = EditSession(project: project)
+        let everything = screen.allRegions.map(\.id)
+        let moveAll = try time("perform and undo a select-all move", regions: 5000, iterations: 3) {
+            try session.perform(MoveRegions(screen: screen.id, regions: everything, dx: 8, dy: 0))
+            try session.undo()
+        }
+        XCTAssertLessThan(moveAll, 500)
     }
 }
