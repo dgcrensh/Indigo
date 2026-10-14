@@ -88,4 +88,40 @@ final class ProjectPackageTests: XCTestCase {
         project.editorState = EditorState()
         XCTAssertEqual(ProjectPackage.write(project: project, previous: withState.tree).removed, [".editor-state.json"])
     }
+
+    func testWritingTheExampleOverItselfChangesNothing() throws {
+        let tree = try Fixtures.readTree(at: Fixtures.examplePackage)
+        let result = ProjectPackage.write(project: try ProjectPackage.read(tree), previous: tree)
+        XCTAssertTrue(result.changes.isEmpty)
+        XCTAssertEqual(ProjectPackage.applying(result.changes, to: tree), tree)
+    }
+
+    func testRenameChangesWriteTheManifestAndNewFileAndDeleteTheOldOne() throws {
+        let project = AcmeExample.make()
+        let first = ProjectPackage.write(project: project)
+        // Nothing links to Login (Desktop), so no other screen file carries its name.
+        try XCTUnwrap(project.screen(withID: AcmeExample.loginDesktop)).name = "Login (Wide)"
+
+        let changes = ProjectPackage.write(project: project, previous: first.tree).changes
+        XCTAssertEqual(Set(changes.written.keys), ["project.json", "screens/login-wide.json"])
+        XCTAssertEqual(changes.deleted, ["screens/login-desktop.json"])
+    }
+
+    func testApplyingChangesKeepsFilesTheProjectDoesNotOwn() throws {
+        let project = AcmeExample.make()
+        var previous = ProjectPackage.write(project: project).tree
+        let unknown: PackageTree = [
+            ".gitignore": Data(".editor-state.json\n".utf8),
+            "references/login.png": Data([0x89, 0x50, 0x4E, 0x47]),
+        ]
+        previous.merge(unknown) { old, _ in old }
+        try XCTUnwrap(project.screen(withID: AcmeExample.settings)).name = "Preferences"
+        project.screens.removeAll { $0.id == AcmeExample.accountMenu }
+
+        let result = ProjectPackage.write(project: project, previous: previous)
+        let applied = ProjectPackage.applying(result.changes, to: previous)
+        XCTAssertEqual(applied, result.tree.merging(unknown) { old, _ in old })
+        XCTAssertNil(applied["screens/settings.json"])
+        XCTAssertNil(applied["screens/account-menu.json"])
+    }
 }
