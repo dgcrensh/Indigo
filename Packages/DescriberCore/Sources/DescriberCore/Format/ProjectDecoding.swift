@@ -83,6 +83,15 @@ enum ProjectDecoding {
         return state
     }
 
+    /// Reads the region clipboard's JSON: the source screen's ID and region trees in the screen file's region format.
+    static func clipboard(_ data: Data) throws -> (screen: ScreenID, regions: [Region]) {
+        let file = RegionClipboard.fileName
+        let dto = try decode(ClipboardDTO.self, from: data, file: file)
+        var seenRegionIDs = Set<RegionID>()
+        let regions = try dto.regions.map { try makeRegion($0, file: file, seenRegionIDs: &seenRegionIDs) }
+        return (ScreenID(dto.screen), regions)
+    }
+
     // MARK: Building the model
 
     private static func makeScreen(_ dto: ScreenDTO, file: String, seenRegionIDs: inout Set<RegionID>) throws
@@ -217,6 +226,11 @@ private struct RegionDTO: Decodable {
     var scroll: ScrollDTO?
     var linksTo: [LinkDTO]?
     var children: [RegionDTO]?
+}
+
+private struct ClipboardDTO: Decodable {
+    var screen: String
+    var regions: [RegionDTO]
 }
 
 private struct ScrollDTO: Decodable {

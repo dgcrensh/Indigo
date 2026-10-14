@@ -201,10 +201,52 @@ public struct ReorderRegion: Command {
     }
 }
 
+/// Moves several regions to the top or bottom of their own siblings, keeping their order among themselves (spec
+/// Section 7). Regions with different parents are reordered within their own parents.
+public struct ReorderRegions: Command {
+    public let screen: ScreenID
+    public let regions: [RegionID]
+    public let position: ReorderRegion.Position
+
+    public init(screen: ScreenID, regions: [RegionID], to position: ReorderRegion.Position) {
+        self.screen = screen
+        self.regions = regions
+        self.position = position
+    }
+
+    public var actionName: String { position == .front ? "Bring to Front" : "Send to Back" }
+
+    /// Throws `nothingToDo` when every region is already where it would go, so no empty step is recorded.
+    public func apply(to project: Project) throws -> Command {
+        let screen = try project.requireScreen(self.screen)
+        let index = RegionIndex(screen: screen)
+        if let missing = regions.first(where: { !index.contains($0) }) { throw EditError.regionNotFound(missing) }
+        let selected = Set(regions)
+
+        func reordered(_ siblings: [Region]) -> [Region] {
+            let moving = siblings.filter { selected.contains($0.id) }
+            let staying = siblings.filter { !selected.contains($0.id) }
+            return position == .front ? staying + moving : moving + staying
+        }
+        let lists = [screen.regions] + screen.allRegions.map(\.children)
+        guard lists.contains(where: { reordered($0).map(\.id) != $0.map(\.id) }) else {
+            throw EditError.nothingToDo
+        }
+
+        let before = RegionLayout(screen: screen)
+        for region in screen.allRegions where region.children.contains(where: { selected.contains($0.id) }) {
+            region.children = reordered(region.children)
+        }
+        screen.regions = reordered(screen.regions)
+        return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+    }
+}
+
 /// Pastes copies of regions, with new IDs throughout each subtree and links kept. The copies are made when the
 /// command is created, so `pasted` tells the caller which regions to select.
 public struct PasteRegions: Command {
-    public let actionName = "Paste"
+    /// "Paste", or "Duplicate" for a duplicate.
+    public let actionName: String
     public let screen: ScreenID
     /// The new regions, top-level copies only; their children come with them.
     public let pasted: [Region]
@@ -212,7 +254,8 @@ public struct PasteRegions: Command {
     public let parent: RegionID?
 
     /// `regions` are copied; the originals are never inserted, so they may come from any screen or the clipboard.
-    public init(screen: ScreenID, regions: [Region], parent: RegionID? = nil) {
+    public init(screen: ScreenID, regions: [Region], parent: RegionID? = nil, actionName: String = "Paste") {
+        self.actionName = actionName
         self.screen = screen
         self.pasted = regions.map { $0.copyWithNewIDs() }
         self.parent = parent

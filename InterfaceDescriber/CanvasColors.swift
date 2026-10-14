@@ -9,6 +9,8 @@ struct CanvasColors {
     var regionBorder: CGColor
     var outside: CGColor
     var title: CGColor
+    /// Descriptions shown on the canvas with `D`.
+    var description: CGColor
     var emptyText: CGColor
     /// Selected regions' borders, handle borders, and the outlines of a region being drawn and the marquee.
     var selection: CGColor
@@ -32,6 +34,7 @@ struct CanvasColors {
                 NSColor.white,
                 NSColor.controlAccentColor.withAlphaComponent(0.12),
                 NSColor.controlAccentColor.withAlphaComponent(0.1),
+                NSColor.secondaryLabelColor,
             ].map(\.cgColor)
         }
         boundsFill = colors[0]
@@ -46,5 +49,6 @@ struct CanvasColors {
         handleFill = colors[9]
         newRegionFill = colors[10]
         marqueeFill = colors[11]
+        description = colors[12]
     }
 }

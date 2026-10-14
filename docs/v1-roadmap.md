@@ -20,7 +20,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 4 | Canvas rendering (starts with a 500-region performance spike) | [m4-canvas-rendering.md](plans/m4-canvas-rendering.md) | 3 | shipped |
 | 5 | Tools, gestures, toasts, keybind registry | [m5-tools-gestures.md](plans/m5-tools-gestures.md) | 4 | shipped |
 | 6 | Details panel | [m6-details-panel.md](plans/m6-details-panel.md) | 5 | shipped |
-| 7 | Selection and editing | not written | 5 | |
+| 7 | Selection and editing | [m7-selection-editing.md](plans/m7-selection-editing.md) | 5 | shipped |
 | 8 | Screens, viewports, variants, links | not written | 3 (link following needs 5) | |
 | 9 | Scrolling | not written | 5, 6 | |
 | 10 | Settings file and live reload | not written | 3 | |
