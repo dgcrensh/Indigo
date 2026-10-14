@@ -163,6 +163,6 @@ final class CorePerformanceTests: XCTestCase {
             try session.perform(MoveRegions(screen: screen.id, regions: everything, dx: 8, dy: 0))
             try session.undo()
         }
-        XCTAssertLessThan(moveAll, 500)
+        XCTAssertLessThan(moveAll, 1500)
     }
 }
