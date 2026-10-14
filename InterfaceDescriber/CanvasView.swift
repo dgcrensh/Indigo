@@ -18,6 +18,8 @@ final class CanvasView: NSView {
             if gridSize != oldValue { needsDisplay = true }
         }
     }
+    /// Titles laid out in earlier draws.
+    let titleCache = TitleCache()
     /// Called after a gesture or a zoom command changes the camera, so it can be saved.
     var onCameraChange: ((Camera) -> Void)?
     /// Called after the view changes size.
@@ -40,7 +42,7 @@ final class CanvasView: NSView {
             drawNoScreen()
             return
         }
-        CanvasRenderer(screen: screen, camera: camera, gridSize: gridSize).draw(in: dirtyRect)
+        CanvasRenderer(screen: screen, camera: camera, gridSize: gridSize, titles: titleCache).draw(in: dirtyRect)
     }
 
     private func drawNoScreen() {

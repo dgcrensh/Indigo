@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import DescriberCore
 
 /// Draws a screen the way the canvas shows it: the canvas bounds, the grid, and the regions with their titles and
@@ -9,8 +10,9 @@ struct CanvasRenderer {
     var camera: Camera
     /// The grid size to draw lines for, or nil for no grid.
     var gridSize: Int?
+    /// Laid-out titles, kept by the canvas between draws.
+    var titles: TitleCache
 
-    static let titleFont = NSFont.systemFont(ofSize: 11, weight: .medium)
     static let titleInset = CGSize(width: 4, height: 2)
 
     /// Draws everything that falls in `dirtyRect`, in view points, and returns how many regions it drew.
@@ -68,15 +70,10 @@ struct CanvasRenderer {
         let fill = NSColor.controlAccentColor.withAlphaComponent(0.06).cgColor
         let border = NSColor.secondaryLabelColor.cgColor
         let outside = NSColor.systemRed.withAlphaComponent(0.2).cgColor
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Self.titleFont,
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: paragraph,
-        ]
-        let titleHeight = ceil(Self.titleFont.ascender - Self.titleFont.descender + Self.titleFont.leading)
+        let titleColor = NSColor.labelColor.cgColor
         let inset = Self.titleInset
+        // Text is drawn upright in the flipped context.
+        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
 
         context.setLineWidth(1)
         var drawn = 0
@@ -87,30 +84,22 @@ struct CanvasRenderer {
             let rect = camera.viewRect(fromScreen: frame)
             context.setFillColor(fill)
             context.fill(rect)
-            let parts = region.frame.parts(outside: bounds)
-            if !parts.isEmpty {
+            if !bounds.contains(region.frame) {
                 context.setFillColor(outside)
-                for part in parts {
+                for part in region.frame.parts(outside: bounds) {
                     context.fill(camera.viewRect(fromScreen: part.cgRect))
                 }
             }
             context.setStrokeColor(border)
             context.stroke(rect.insetBy(dx: 0.5, dy: 0.5))
 
-            let titleRect = CGRect(
-                x: rect.minX + inset.width,
-                y: rect.minY + inset.height,
-                width: rect.width - 2 * inset.width,
-                height: titleHeight
-            )
-            if titleRect.width >= 8, rect.height >= titleHeight + 2 * inset.height {
-                (region.title as NSString).draw(
-                    with: titleRect,
-                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                    attributes: attributes,
-                    context: nil
-                )
-            }
+            let titleWidth = rect.width - 2 * inset.width
+            guard titleWidth >= 8, rect.height >= titles.lineHeight + 2 * inset.height,
+                let line = titles.line(for: region.title, fitting: titleWidth)
+            else { continue }
+            context.setFillColor(titleColor)
+            context.textPosition = CGPoint(x: rect.minX + inset.width, y: rect.minY + inset.height + titles.ascent)
+            CTLineDraw(line, context)
         }
         return drawn
     }
