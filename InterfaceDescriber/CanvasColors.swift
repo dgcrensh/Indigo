@@ -2,6 +2,8 @@ import AppKit
 
 /// The canvas colors, resolved for one appearance so layers can use them as `CGColor`s.
 struct CanvasColors {
+    /// Around the canvas bounds. The canvas view draws its own; exported images use this.
+    var background: CGColor
     var boundsFill: CGColor
     var boundsBorder: CGColor
     var grid: CGColor
@@ -41,6 +43,7 @@ struct CanvasColors {
                 NSColor.secondaryLabelColor,
                 NSColor.linkColor,
                 NSColor.tertiaryLabelColor,
+                NSColor.underPageBackgroundColor,
             ].map(\.cgColor)
         }
         boundsFill = colors[0]
@@ -58,5 +61,6 @@ struct CanvasColors {
         description = colors[12]
         link = colors[13]
         scrollIndicator = colors[14]
+        background = colors[15]
     }
 }

@@ -54,11 +54,33 @@ final class ExampleProjectTests: XCTestCase {
         )
     }
 
-    /// Rewrites `Schema/examples/acme.uidesc` from `AcmeExample` when `REGENERATE_EXAMPLE=1` is set.
+    func testExampleExportsAreWhatTheExportersWrite() throws {
+        let project = AcmeExample.make()
+        let regenerate = "Run REGENERATE_EXAMPLE=1 swift test --filter testRegenerateExample"
+        XCTAssertEqual(
+            Fixtures.string(try Data(contentsOf: Fixtures.exampleMarkdown)),
+            MarkdownExport.markdown(for: project),
+            "Schema/examples/acme.md is out of date. \(regenerate)")
+        XCTAssertEqual(
+            Fixtures.string(try Data(contentsOf: Fixtures.exampleJSON)),
+            Fixtures.string(ProjectJSONExport.data(for: project)),
+            "Schema/examples/acme.json is out of date. \(regenerate)")
+    }
+
+    func testExampleJSONExportMatchesTheSchema() throws {
+        let validator = try SchemaValidator(schema: Data(contentsOf: Fixtures.schema))
+        let errors = try validator.validate(Data(contentsOf: Fixtures.exampleJSON))
+        XCTAssertTrue(errors.isEmpty, errors.map(\.description).joined(separator: "\n"))
+    }
+
+    /// Rewrites `Schema/examples/acme.uidesc` and its exports from `AcmeExample` when `REGENERATE_EXAMPLE=1` is set.
     func testRegenerateExample() throws {
         guard ProcessInfo.processInfo.environment["REGENERATE_EXAMPLE"] == "1" else {
             throw XCTSkip("Set REGENERATE_EXAMPLE=1 to rewrite the example project.")
         }
-        try Fixtures.writeTree(ProjectPackage.write(project: AcmeExample.make()).tree, to: Fixtures.examplePackage)
+        let project = AcmeExample.make()
+        try Fixtures.writeTree(ProjectPackage.write(project: project).tree, to: Fixtures.examplePackage)
+        try MarkdownExport.data(for: project).write(to: Fixtures.exampleMarkdown)
+        try ProjectJSONExport.data(for: project).write(to: Fixtures.exampleJSON)
     }
 }

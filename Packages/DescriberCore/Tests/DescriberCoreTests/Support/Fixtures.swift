@@ -13,6 +13,9 @@ enum Fixtures {
 
     static let examplePackage = repositoryRoot.appendingPathComponent("Schema/examples/acme.uidesc")
     static let schema = repositoryRoot.appendingPathComponent("Schema/uidesc-1.schema.json")
+    /// The example project's Markdown and single-file JSON exports, written by `testRegenerateExample`.
+    static let exampleMarkdown = repositoryRoot.appendingPathComponent("Schema/examples/acme.md")
+    static let exampleJSON = repositoryRoot.appendingPathComponent("Schema/examples/acme.json")
 
     /// Every file under `directory`, keyed by relative path.
     static func readTree(at directory: URL) throws -> PackageTree {
