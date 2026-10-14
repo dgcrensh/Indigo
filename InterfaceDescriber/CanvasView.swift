@@ -119,7 +119,7 @@ final class CanvasView: NSView {
     /// The screen's regions by ID, as of the last reload.
     private var regions: [RegionID: Region] = [:]
     /// Where the screen's regions are drawn, as of the last reload or scroll.
-    private(set) var layout: ScrollLayout?
+    private(set) var scrollLayout: ScrollLayout?
     /// The frame and clip each region's layers were last given, so a scroll only updates the layers that move.
     private var drawnRegions: [RegionID: DrawnRegion] = [:]
     /// The regions drawn at a previewed frame.
@@ -252,7 +252,7 @@ final class CanvasView: NSView {
             guard let screen else {
                 regionLayers = [:]
                 regions = [:]
-                layout = nil
+                scrollLayout = nil
                 drawnRegions = [:]
                 regionsLayer.sublayers = nil
                 layoutGrid()
@@ -261,7 +261,7 @@ final class CanvasView: NSView {
             }
             let bounds = screen.canvasBounds
             let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
-            self.layout = layout
+            self.scrollLayout = layout
             drawnRegions = [:]
             let selected = Set(selection)
             var kept: [RegionID: RegionLayers] = [:]
@@ -301,7 +301,7 @@ final class CanvasView: NSView {
     private func applyScroll() {
         guard let screen else { return }
         let layout = ScrollLayout(screen: screen, offsets: scrollOffsets)
-        self.layout = layout
+        self.scrollLayout = layout
         let bounds = screen.canvasBounds
         for (id, layers) in regionLayers {
             let drawn = DrawnRegion(layout, id)
@@ -411,7 +411,7 @@ final class CanvasView: NSView {
     /// Draws the regions in `frames` (drawn frames) at those frames, and every other region that had a previewed
     /// frame where it is drawn.
     private func showPreviewFrames(_ frames: [RegionID: Frame]) {
-        guard let screen, let layout else { return }
+        guard let screen, let layout = scrollLayout else { return }
         let bounds = screen.canvasBounds
         for id in previewedRegions where frames[id] == nil {
             guard let layers = regionLayers[id], let drawn = drawnRegions[id] else { continue }
@@ -452,7 +452,7 @@ final class CanvasView: NSView {
     /// Outlines the content area of each selected scrolling region, except while a gesture moves or resizes regions.
     private func layoutContentOutline() {
         let path = CGMutablePath()
-        if let layout, case .none = preview {
+        if let layout = scrollLayout, case .none = preview {
             for id in selection where regions[id]?.scroll != nil {
                 guard layout.visibleFrame(of: id) != nil, let area = layout.drawnContentArea(of: id) else { continue }
                 path.addRect(RegionLayers.zoomed(area, camera.zoom))
