@@ -17,7 +17,7 @@ final class DetailsPanelController: NSViewController {
     /// Asks the window to commit the open region and close the panel, for Escape.
     var onClose: (() -> Void)?
 
-    let titleField = NSTextField(string: "")
+    let titleField = PanelTextField(string: "")
     let descriptionView: NSTextView
     private let descriptionScrollView: NSScrollView
     let kindChips = KindChips(frame: .zero)
@@ -60,6 +60,9 @@ final class DetailsPanelController: NSViewController {
         textView.panelUndoManager = textUndoManager
         fieldEditor = makeFieldEditor()
         textView.onFocusChange = { [weak self] in
+            self?.focusDidChange()
+        }
+        titleField.onFocusChange = { [weak self] in
             self?.focusDidChange()
         }
     }
@@ -584,6 +587,17 @@ final class LinkRow: WellStackView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used")
+    }
+}
+
+/// A text field that says when it gains focus, which hands its editing to the field editor.
+final class PanelTextField: NSTextField {
+    var onFocusChange: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        onFocusChange?()
+        return became
     }
 }
 
