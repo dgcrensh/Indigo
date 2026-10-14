@@ -24,6 +24,38 @@ public enum ProjectPackage {
         public var changed: Set<String> {
             Set(tree.keys).subtracting(unchanged)
         }
+
+        /// The edits that bring the previous package up to date with this write.
+        public var changes: Changes {
+            Changes(written: tree.filter { !unchanged.contains($0.key) }, deleted: removed)
+        }
+    }
+
+    /// Edits to a package: files to write and files to delete. Files not named are left alone.
+    public struct Changes: Equatable {
+        /// New or different files, keyed by relative path.
+        public var written: PackageTree
+        /// Relative paths of files to remove.
+        public var deleted: Set<String>
+
+        public init(written: PackageTree = [:], deleted: Set<String> = []) {
+            self.written = written
+            self.deleted = deleted
+        }
+
+        public var isEmpty: Bool {
+            written.isEmpty && deleted.isEmpty
+        }
+    }
+
+    /// `tree` with `changes` applied. Files the project doesn't own, such as a `references/` folder, are kept.
+    public static func applying(_ changes: Changes, to tree: PackageTree) -> PackageTree {
+        var result = tree
+        for path in changes.deleted {
+            result[path] = nil
+        }
+        result.merge(changes.written) { _, new in new }
+        return result
     }
 
     /// Reads a project from a tree.

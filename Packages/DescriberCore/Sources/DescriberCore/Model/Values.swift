@@ -41,6 +41,9 @@ public struct Viewport: Hashable, Sendable {
         self.width = width
         self.height = height
     }
+
+    /// The viewport new screens get until settings provide one (milestone 10).
+    public static let defaultForNewScreens = Viewport(preset: "iphone-15", width: 393, height: 852)
 }
 
 public enum ScrollAxis: String, CaseIterable, Sendable {

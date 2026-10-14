@@ -1,7 +1,7 @@
 import Foundation
 
-/// Applies commands to a project and keeps the undo and redo stacks. The app bridges this to `NSUndoManager`
-/// (milestone 3); the core never imports AppKit.
+/// Applies commands to a project and keeps the undo and redo stacks. The app bridges this to `NSUndoManager` in
+/// `Document.perform(_:)`; the core never imports AppKit.
 public final class EditSession {
     public let project: Project
     private var undoStack: [Command] = []

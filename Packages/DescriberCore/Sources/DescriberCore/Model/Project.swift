@@ -30,4 +30,17 @@ public final class Project {
     public func screen(withID id: ScreenID) -> Screen? {
         screens.first { $0.id == id }
     }
+
+    /// The project a new document starts with: one screen at the default viewport.
+    public static func untitled() -> Project {
+        Project(name: "Untitled", screens: [Screen(name: "Screen 1", viewport: .defaultForNewScreens)])
+    }
+
+    /// The screen a newly opened window shows: the last active screen when it still exists, otherwise the first.
+    public var initialScreen: ScreenID? {
+        if let last = editorState.lastActiveScreen, screen(withID: last) != nil {
+            return last
+        }
+        return screens.first?.id
+    }
 }
