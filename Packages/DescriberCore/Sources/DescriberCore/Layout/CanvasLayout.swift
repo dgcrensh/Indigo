@@ -1,5 +1,10 @@
 import Foundation
 
+// On Apple platforms CGRect's geometry lives in CoreGraphics; on Linux, Foundation has it all.
+#if canImport(CoreGraphics)
+    import CoreGraphics
+#endif
+
 extension Screen {
     /// The viewport as a frame at the screen's origin.
     public var viewportFrame: Frame {

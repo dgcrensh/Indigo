@@ -2,6 +2,10 @@ import XCTest
 
 @testable import DescriberCore
 
+#if canImport(CoreGraphics)
+    import CoreGraphics
+#endif
+
 final class CameraTests: XCTestCase {
     private let viewSize = CGSize(width: 800, height: 600)
 

@@ -2,6 +2,10 @@ import XCTest
 
 @testable import DescriberCore
 
+#if canImport(CoreGraphics)
+    import CoreGraphics
+#endif
+
 final class CanvasLayoutTests: XCTestCase {
     private let bounds = Frame(x: 0, y: 0, w: 100, h: 200)
 

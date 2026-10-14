@@ -1,5 +1,10 @@
 import Foundation
 
+// On Apple platforms CGRect's geometry lives in CoreGraphics; on Linux, Foundation has it all.
+#if canImport(CoreGraphics)
+    import CoreGraphics
+#endif
+
 /// The zoom and pan the canvas shows one screen with. `panX` and `panY` are the screen point at the view's
 /// top-left corner, as in `ScreenEditorState`, so a view point is `(screen point − pan) × zoom`. View coordinates
 /// grow down, like screen coordinates.
