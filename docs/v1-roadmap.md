@@ -18,7 +18,7 @@ Plans are written a milestone or two ahead of the build, so later plans can use 
 | 2 | Command layer, parenting, snapping | [m2-commands.md](plans/m2-commands.md) | 1 | shipped |
 | 3 | Document and app shell | [m3-document-shell.md](plans/m3-document-shell.md) | 1, 2 | shipped |
 | 4 | Canvas rendering (starts with a 500-region performance spike) | [m4-canvas-rendering.md](plans/m4-canvas-rendering.md) | 3 | shipped |
-| 5 | Tools, gestures, toasts, keybind registry | not written | 4 | |
+| 5 | Tools, gestures, toasts, keybind registry | [m5-tools-gestures.md](plans/m5-tools-gestures.md) | 4 | shipped |
 | 6 | Details panel | not written | 5 | |
 | 7 | Selection and editing | not written | 5 | |
 | 8 | Screens, viewports, variants, links | not written | 3 (link following needs 5) | |

@@ -16,7 +16,12 @@ final class Document: NSDocument {
     }
 
     override func makeWindowControllers() {
-        addWindowController(DocumentWindowController(model: model))
+        let controller = DocumentWindowController(model: model)
+        controller.canvasController.performCommand = { [weak self] command in
+            guard let self else { return }
+            try self.perform(command)
+        }
+        addWindowController(controller)
     }
 
     // MARK: Reading and writing

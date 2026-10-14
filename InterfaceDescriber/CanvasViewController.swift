@@ -1,19 +1,30 @@
 import AppKit
 import DescriberCore
 import Observation
+import SwiftUI
 
-/// Shows the document's active screen in a `CanvasView`. Keeps each screen's zoom and pan in the project's editor
-/// state, and draws again after every change to the project.
+/// Shows the document's active screen in a `CanvasView`. Keeps each screen's zoom, pan and grid size in the
+/// project's editor state, draws again after every change to the project, and turns clicks and drags into commands
+/// through `CanvasGesture`.
 final class CanvasViewController: NSViewController {
     /// Space around the viewport when a screen is fitted into the canvas.
     static let fitPadding = 40.0
 
     let model: DocumentModel
+    /// Performs a command as one undo step. The document sets this to `Document.perform(_:)`; without it, commands
+    /// go straight to the edit session.
+    var performCommand: ((Command) throws -> Void)?
+    let canvasView = CanvasView(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
+    let toastView = ToastView(frame: .zero)
     private var shownScreenID: ScreenID?
     private var shownProject: ObjectIdentifier?
+    private var shownRevision: Int?
     /// Whether the camera is the fitted default rather than one the user chose. A fitted camera is refitted when the
     /// canvas changes size, and isn't saved.
     private(set) var isFitted = false
+    /// The press, drag and release in progress.
+    private var gesture: CanvasGesture?
+    private var gridPopover: NSPopover?
 
     init(model: DocumentModel) {
         self.model = model
@@ -25,20 +36,25 @@ final class CanvasViewController: NSViewController {
         fatalError("init(coder:) is not used")
     }
 
-    var canvasView: CanvasView {
-        view as! CanvasView
-    }
-
     override func loadView() {
-        let canvas = CanvasView(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
-        canvas.onCameraChange = { [weak self] camera in
+        let container = NSView(frame: canvasView.frame)
+        canvasView.autoresizingMask = [.width, .height]
+        canvasView.interaction = self
+        canvasView.onCameraChange = { [weak self] camera in
             self?.save(camera)
         }
-        canvas.onResize = { [weak self] in
+        canvasView.onResize = { [weak self] in
             guard let self, self.isFitted, let screen = self.canvasView.screen else { return }
             self.fit(screen)
         }
-        view = canvas
+        container.addSubview(canvasView)
+        toastView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(toastView)
+        NSLayoutConstraint.activate([
+            toastView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            toastView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -24),
+        ])
+        view = container
     }
 
     override func viewDidLoad() {
@@ -53,6 +69,8 @@ final class CanvasViewController: NSViewController {
             _ = model.revision
             _ = model.activeScreenID
             _ = model.snappingEnabled
+            _ = model.tool
+            _ = model.selection
         } onChange: { [weak self] in
             let controller = self
             Task { @MainActor in
@@ -63,20 +81,44 @@ final class CanvasViewController: NSViewController {
     }
 
     /// Shows the active screen as the model has it now, restoring its camera when the screen or project changed.
+    /// Rebuilds the region layers only when the project changed.
     func update() {
         let screen = model.activeScreen
         canvasView.screen = screen
         let project = ObjectIdentifier(model.project)
-        if screen?.id != shownScreenID || project != shownProject {
+        let screenChanged = screen?.id != shownScreenID || project != shownProject
+        if screenChanged {
             shownScreenID = screen?.id
             shownProject = project
             restoreCamera(for: screen)
+            setSelection([])
+        } else if let screen {
+            setSelection(DescriberCore.Selection.pruned(model.selection, to: screen))
         }
-        canvasView.gridSize = screen.flatMap { model.snappingEnabled ? gridSize(for: $0) : nil }
-        canvasView.reload()
+        if screenChanged || model.revision != shownRevision {
+            shownRevision = model.revision
+            canvasView.reload()
+        }
+        canvasView.tool = model.tool
+        if gesture == nil {
+            canvasView.selection = model.selection
+        }
+        updateGrid()
     }
 
-    private func gridSize(for screen: Screen) -> Int {
+    /// Sets the model's selection, leaving it alone when it wouldn't change so observers aren't woken for nothing.
+    private func setSelection(_ selection: [RegionID]) {
+        if model.selection != selection {
+            model.selection = selection
+        }
+    }
+
+    private func updateGrid() {
+        let showsGrid = model.snappingEnabled || gridPopover != nil
+        canvasView.gridSize = canvasView.screen.flatMap { showsGrid ? gridSize(for: $0) : nil }
+    }
+
+    func gridSize(for screen: Screen) -> Int {
         model.project.editorState.screens[screen.id]?.gridSize ?? Snapping.defaultGridSize
     }
 
@@ -104,13 +146,19 @@ final class CanvasViewController: NSViewController {
         )
     }
 
+    /// The editor state of the shown screen, starting from the current camera when it has none, so writing it
+    /// doesn't lose the zoom and pan the canvas shows.
+    private var shownScreenState: ScreenEditorState? {
+        guard let id = shownScreenID else { return nil }
+        return model.project.editorState.screens[id] ?? canvasView.camera.applied(to: ScreenEditorState())
+    }
+
     /// Keeps a camera the user chose in the editor state. Zoom and pan are view state, not edits, so this is not
     /// undoable and doesn't mark the document as changed; the next save writes it.
     private func save(_ camera: Camera) {
-        guard let id = shownScreenID else { return }
+        guard let id = shownScreenID, let state = shownScreenState else { return }
         isFitted = false
-        let editorState = model.project.editorState
-        model.project.editorState.screens[id] = camera.applied(to: editorState.screens[id] ?? ScreenEditorState())
+        model.project.editorState.screens[id] = camera.applied(to: state)
     }
 
     // MARK: Zoom commands
@@ -133,5 +181,148 @@ final class CanvasViewController: NSViewController {
     func actualSize() {
         guard let screen = canvasView.screen else { return }
         canvasView.change(to: .actualSize(centering: screen.viewportFrame.cgRect, viewSize: canvasView.bounds.size))
+    }
+
+    // MARK: Tools, snapping and the grid
+
+    func choose(_ tool: Tool) {
+        model.tool = tool
+        canvasView.tool = tool
+        show(.tool(tool))
+    }
+
+    func toggleSnapping() {
+        model.snappingEnabled.toggle()
+        show(.snapping(on: model.snappingEnabled))
+        updateGrid()
+    }
+
+    private func show(_ toast: Toast) {
+        toastView.show(toast.text(keybinds: model.keybinds))
+    }
+
+    /// Sets the shown screen's grid size. Editor state like zoom: it never moves a region and isn't undoable.
+    func setGridSize(_ size: Int) {
+        guard let id = shownScreenID, var state = shownScreenState else { return }
+        state.gridSize = size
+        model.project.editorState.screens[id] = state
+        isFitted = false
+        show(.gridSize(size))
+        updateGrid()
+    }
+
+    /// Opens the grid-size slider, or closes it if it is open. The grid shows while it is open.
+    func toggleGridSizePopover() {
+        if let gridPopover {
+            if gridPopover.isShown {
+                gridPopover.performClose(nil)
+            } else {
+                self.gridPopover = nil
+                updateGrid()
+            }
+            return
+        }
+        guard let screen = canvasView.screen else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentViewController = NSHostingController(
+            rootView: GridSizePicker(size: gridSize(for: screen)) { [weak self] size in
+                self?.setGridSize(size)
+            })
+        gridPopover = popover
+        updateGrid()
+        if canvasView.window?.isVisible == true {
+            let anchor = CGRect(x: canvasView.bounds.midX, y: 12, width: 1, height: 1)
+            popover.show(relativeTo: anchor, of: canvasView, preferredEdge: .maxY)
+        }
+    }
+
+    var isShowingGridSizePopover: Bool {
+        gridPopover != nil
+    }
+
+    /// Runs a keybind the canvas received. Menu key equivalents usually get these first.
+    func handle(_ action: KeyAction) -> Bool {
+        switch action {
+        case .selectTool: choose(.select)
+        case .regionTool: choose(.region)
+        case .writeTool: choose(.write)
+        case .toggleSnapping: toggleSnapping()
+        case .gridSize: toggleGridSizePopover()
+        default: return false
+        }
+        return true
+    }
+
+    // MARK: Gestures
+
+    private func apply(_ command: Command) {
+        do {
+            if let performCommand {
+                try performCommand(command)
+            } else {
+                try model.session.perform(command)
+                model.noteChange()
+            }
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    private func showGesture() {
+        guard let gesture else { return }
+        canvasView.preview = gesture.preview
+        canvasView.selection = gesture.selection
+    }
+}
+
+extension CanvasViewController: CanvasInteraction {
+    func canvasPressed(at point: CGPoint, modifiers: KeyCombo.Modifiers) {
+        guard let screen = model.activeScreen else { return }
+        let context = GestureContext(
+            screen: screen,
+            tool: model.tool,
+            selection: model.selection,
+            snappingEnabled: model.snappingEnabled,
+            gridSize: gridSize(for: screen),
+            zoom: canvasView.camera.zoom
+        )
+        gesture = CanvasGesture(pressAt: point, modifiers: modifiers, context: context)
+        showGesture()
+    }
+
+    func canvasDragged(to point: CGPoint, optionHeld: Bool) {
+        gesture?.drag(to: point, optionHeld: optionHeld)
+        showGesture()
+    }
+
+    func canvasOptionChanged(optionHeld: Bool) {
+        gesture?.update(optionHeld: optionHeld)
+        showGesture()
+    }
+
+    func canvasReleased(at point: CGPoint, optionHeld: Bool) {
+        guard var gesture else { return }
+        let command = gesture.release(at: point, optionHeld: optionHeld)
+        self.gesture = nil
+        if let command {
+            apply(command)
+        }
+        canvasView.preview = .none
+        setSelection(gesture.selection)
+        canvasView.selection = gesture.selection
+    }
+
+    func canvasKeyDown(_ combo: KeyCombo) -> Bool {
+        guard let action = model.keybinds.action(for: combo) else { return false }
+        return handle(action)
+    }
+}
+
+extension CanvasViewController: NSPopoverDelegate {
+    func popoverDidClose(_ notification: Notification) {
+        gridPopover = nil
+        updateGrid()
     }
 }

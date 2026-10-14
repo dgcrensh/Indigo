@@ -76,11 +76,7 @@ public struct MoveRegions: Command {
         let roots = try topmostRegions(regions, in: index)
         guard let first = roots.first else { throw EditError.nothingToDo }
 
-        var delta = (x: dx, y: dy)
-        if let grid {
-            let target = Snapping.snap(frame: first.frame.offsetBy(dx: dx, dy: dy), grid: grid, mode: .move)
-            delta = (target.x - first.frame.x, target.y - first.frame.y)
-        }
+        let delta = Self.snappedDelta(moving: first.frame, dx: dx, dy: dy, grid: grid)
 
         let before = RegionLayout(screen: screen)
         for root in roots {
@@ -92,6 +88,14 @@ public struct MoveRegions: Command {
             Parenting.reparentAfterChange(of: root.id, in: screen)
         }
         return RestoreLayout(actionName: actionName, screen: self.screen, layout: before)
+    }
+
+    /// The delta that moves `frame` by `dx`, `dy` and then lands its origin on the grid, or the delta itself when
+    /// `grid` is nil. The canvas previews a move with this, so the preview and the result agree.
+    public static func snappedDelta(moving frame: Frame, dx: Int, dy: Int, grid: Int?) -> (x: Int, y: Int) {
+        guard let grid else { return (dx, dy) }
+        let target = Snapping.snap(frame: frame.offsetBy(dx: dx, dy: dy), grid: grid, mode: .move)
+        return (target.x - frame.x, target.y - frame.y)
     }
 }
 
@@ -259,7 +263,7 @@ public enum RegionCommands {
 
 /// The regions among `ids` that aren't inside another region in `ids`, in the order given. Throws if any ID isn't
 /// on the screen.
-private func topmostRegions(_ ids: [RegionID], in index: RegionIndex) throws -> [Region] {
+func topmostRegions(_ ids: [RegionID], in index: RegionIndex) throws -> [Region] {
     var seen = Set<RegionID>()
     var regions: [Region] = []
     for id in ids where seen.insert(id).inserted {
