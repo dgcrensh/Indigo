@@ -60,7 +60,7 @@ final class OnScreenPerformanceTests: XCTestCase {
             samples.max() ?? 0)
     }
 
-    /// A pinch with its phases, as a trackpad makes (milestone 21): begun, 60 frames out and back in, ended, then the
+    /// A pinch with its phases, as a trackpad makes (milestone 21): begun, 40 frames one way and 20 back, ended, then the
     /// text fitted a frame's budget at a time, as the display link does. Returns the lines to print: the first pinch
     /// frame, every pinch frame, the frame that ends the run, and the frames that fit the text.
     @MainActor
@@ -68,7 +68,7 @@ final class OnScreenPerformanceTests: XCTestCase {
         let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
         let frames = time(60) { step in
             if step == 0 { view.beginZoomRun() }
-            let factor = step < 30 ? factor : 1 / factor
+            let factor = step < 40 ? factor : 1 / factor
             view.change(to: view.camera.zoomed(to: view.camera.zoom * factor, anchor: center))
         }
         let end = time(1) { _ in view.endZoomRun() }

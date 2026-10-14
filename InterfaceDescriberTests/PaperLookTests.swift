@@ -53,8 +53,9 @@ final class PaperLookTests: XCTestCase {
         let text = try addRegion(Frame(x: 16, y: 80, w: 120, h: 40), titled: "Body", kind: .text, to: document)
         let tiny = try addRegion(Frame(x: 16, y: 140, w: 4, h: 20), titled: "Rule", to: document)
         canvas.update()
-        canvas.canvasView.camera = Camera(zoom: 1)
         let view = canvas.canvasView
+        // Zoom commands' steps, so the changes here don't make a zoom run drawn with a transform.
+        view.step(to: Camera(zoom: 1))
 
         for (name, palette) in [(NSAppearance.Name.aqua, PaperPalette.light), (.darkAqua, PaperPalette.dark)] {
             controller.window?.appearance = NSAppearance(named: name)
@@ -64,7 +65,6 @@ final class PaperLookTests: XCTestCase {
         }
         XCTAssertEqual(view.cornerRadius(of: button), 6)
         XCTAssertEqual(view.cornerRadius(of: tiny), 1, "a small region's corners are capped")
-        // A zoom command's step, so it doesn't join the change above in a zoom run drawn with a transform.
         view.step(to: Camera(zoom: 2))
         XCTAssertEqual(view.cornerRadius(of: button), 12, "corners scale with zoom")
     }
